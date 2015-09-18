@@ -3,6 +3,7 @@ function runtest(filename)
     include(filename)
 end
 
+runtest("center_indexed_arrays.jl")
 runtest("register_core.jl")
 runtest("register_deformation.jl")
 if !(isdefined(Main, :use_cuda) && Main.use_cuda==false) &&

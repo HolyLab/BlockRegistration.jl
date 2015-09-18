@@ -1,5 +1,8 @@
 using CenterIndexedArrays, Base.Test
 
+CenterIndexedArray(Float32, 3, 5)
+@test_throws ErrorException CenterIndexedArray(Float32, 4, 5)
+
 data = rand(3,5)
 A = CenterIndexedArray(data)
 @test size(A) == size(data)

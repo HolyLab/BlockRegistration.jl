@@ -12,6 +12,10 @@ using Base.Cartesian
 
 export CenterIndexedArray
 
+"""
+A `CenterIndexedArray` is one for which the array center has indexes
+`0,0,...`. Along each coordinate, allowed indexes range from `-n:n`.
+"""
 immutable CenterIndexedArray{T,N,A<:AbstractArray} <: DenseArray{T,N}
     data::A
     halfsize::NTuple{N,Int}
@@ -22,6 +26,8 @@ immutable CenterIndexedArray{T,N,A<:AbstractArray} <: DenseArray{T,N}
 end
 
 CenterIndexedArray{T,N}(A::AbstractArray{T,N}) = CenterIndexedArray{T,N,typeof(A)}(A)
+CenterIndexedArray{T}(::Type{T}, dims) = CenterIndexedArray(Array(T, dims))
+CenterIndexedArray{T}(::Type{T}, dims...) = CenterIndexedArray(Array(T, dims))
 
 # This is the AbstractArray default, but do this just to be sure
 linearindexing{A<:CenterIndexedArray}(::Type{A}) = Base.LinearSlow()
