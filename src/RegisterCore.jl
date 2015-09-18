@@ -1,4 +1,4 @@
-__precompile__()
+#__precompile__()
 
 module RegisterCore
 
@@ -29,19 +29,173 @@ export
     pack_nd
 #    write_header
 
-# For deformable registration, mismatch data is specified for blocks
-# of the image.  This may have several different representations:
-#   - (nums,denoms) tuple, where nums[i,j] is the numerator data for
-#     block (i,j) ("Array-of-Arrays" representation)
-#   - (nums,denoms) tuple, where nums[:,:,i,j] is the numerator data for
-#     block (i,j) ("tiled array" representation)
-#   - numsdenoms, where numsdenoms[:,:,i,j] contains an array of NumDenom
-#     pairs (see below)
+"""
+# RegisterCore
+
+`RegisterCore` contains low-level utilities for working with "mismatch
+data."
+
+## Mismatch
+
+*Mismatch* refers to the mean-square pixelwise difference between two
+images of the same size.  The mismatch is computed from two images,
+called `fixed` and `moving`.  The mismatch is computed for a set of
+translations (shifts) of the `moving` image, with a single number
+returned for each possible translation. All translations by an integer
+number of pixels are considered, up to a size `maxshift`.
+
+As a simple example, suppose that `fixed` and `moving` are grayscale
+two-dimensional images of size `m`-by-`n`. Computing the mismatch `D`
+with a `maxshift` of (3,4) would mean that `D` would have size
+(7,9). `D[4,5]` (the center point) would correspond to
+`sum((fixed-moving).^2)`, meaning that the two images were directly
+overlapped without translation.  (For the precise definition of `D`,
+which also includes a normalization term, see the next paragraph.)
+`D[5,5]`, displaced from the center by (1,0), represents the mismatch
+for a single-pixel shift of `moving` along the first coordinate,
+corresponding to `sum((fixed[1:end-1,:]-moving[2:end,:]).^2)`.  Note
+that the top row of `moving` is not used (because of the upward shift,
+it does not overlap `fixed`), and likewise neither is the bottom row
+of `fixed`. Conversely, `D[3,5]` would correspond to a downward
+translation of `moving`.
+
+Mismatch computations actually return two arrays, conventionaly called
+`num` and `denom`, and `D = num./denom`.  `num` represents the
+numerator of the mismatch, for example
+`sum((fixed[1:end-1,:]-moving[2:end,:]).^2)`.  `denom` is used for
+normalization, and can follow one of two conventions. `:pixel`
+normalization returns the number of valid pixels in the overlap
+region, including the effects of any shift; for `denom[4,5]` that
+would be `m*n`, but for `denom[5,5]` it would be `(m-1)*n`, because we
+clip one row of each image.  `:intensity` normalization computes the
+sum-of-square intensities within the overlap region, e.g., `denom[5,5]
+= sum(fixed[1:end-1,:].^2) + sum(moving[2:end,:].^2)`. The default is
+`:intensity`, because that makes the overall mismatch `D = num./denom`
+a dimensionless quantity.
+
+
+While one might initially imagine returning `D = num./denom` directly,
+there are several reasons to return `num` and `denom` separately:
+
+- Mathematically, block computation (see below) involves sums of `num`
+  and `denom` arrays separately;
+- If the shift is so large that there are no pixels of overlap between
+  `fixed` and `moving`, both `num` and `denom` should be zero.
+  However, because `num` and `denom` are computed by Fourier methods,
+  there will be roundoff error.  Returning them separately allows you
+  to control the threshold for what is considered "signal" or "noise"
+  (see `truncatenoise!` and related functions below). Indeed, by
+  appropriate choice of threshold you can require a minimum finite
+  overlap, for example in terms of numbers of pixels (for `:pixel`
+  normalization) or amount of image intensity (for `:intensity`
+  normalization).
+
+### Computing mismatch in blocks
+
+Mismatch can be computed as a whole, or in *blocks*. The basic concept
+behind blocks is simple: if you want a (2,2) grid of blocks, you break
+the `fixed` and `moving` images up into quadrants and compute the
+mismatch separately for each quadrant. The actual implementation is a
+bit more complex, but also a bit more useful:
+
+- Blocks are not "clipped" before computing the mismatch as a function
+  of shift; instead, clipping at block boundaries effectively happens
+  after shifting. This allows one to use all the information available
+  in both images.
+- One might naively assume that, when using a `gridsize` of (3,3), a
+  33x36 image would be split into nine 11x12 blocks. However, this
+  strategy corresponds to having the *centers* of each block at the
+  following grid of locations:
+
+```
+    (6, 6.5)    (6, 18.5)    (6, 30.5)
+    (17,6.5)    (17,18.5)    (17,30.5)
+    (28,6.5)    (28,18.5)    (28,30.5)
+```
+
+Instead, here the convention is that the block centers are on a grid
+that spans the fixed image:
+
+```
+    (1, 1)      (1, 18.5)    (1, 36)
+    (17,1)      (17,18.5)    (17,36)
+    (33,1)      (33,18.5)    (33,36)
+```
+
+In each block, the data used for comparison are symmetric around the
+block center. As a consequence, the `[1,1]` block has 3/4 of its data
+(upper-left, upper-right, and lower-left quadrants) missing. By
+contrast, the `[2,2]` block does not have any missing data, and by
+default the `[2,2]` block includes `9/16 = (3/4)^2` of the pixels in
+the image (with the boundary at the halfway point between block
+centers). The motivation for this convention is that it reduces the
+need to *extrapolate* shifts, because the block centers span the
+entire fixed image.
+
+### Representation of `(nums, denoms)` for block computations
+
+When computing the mismatch in blocks, one obtains one `(num, denom)`
+array-pair for each block; the aggregate over all blocks is sometimes
+denoted `nums`, `denoms`. These may be represented in one of three
+ways:
+
+- As Arrays-of-Arrays: `nums[i,j]` is the `num` array for the `[i,j]` block
+- As tiled Arrays: `nums[:,:,i,j]` is the `num` array for the `[i,j]` block
+- As a tiled array of `NumDenom` pairs: `numdenom[:,:,i,j]` is the
+  `numdenom` array for the `[i,j]` block.  (See `NumDenom` for more
+  information.)
+
+The first form is conceptually simpler.  The second and third forms
+are more suitable for `SharedArray`s or memory-mapped files.
+
+The `Block` type has been defined to provide a fast and efficient
+"view" of one tile in a tiled Array: if `nums` is 4d,
+```
+num = Block(nums, i, j)
+```
+would return a 2d object equivalent to `nums[:,:,i,j]` but without copying data.
+
+### NaN values
+
+Any pixels with `NaN` values are omitted from mismatch computation,
+for both the numerator and denominator. This is different from filling
+`NaN`s with 0; instead, it's as if those pixels simply don't
+exist. This provides several nice features:
+
+- You can register a smaller image to a larger one by padding the
+  smaller image with NaN. The registration will not be affected by the
+  fact that there's an "edge" at the padding location.
+- You can re-register a warped moving image to the fixed image (hoping
+  to further improve the registration), and not worry about the fact
+  that the edges of the warped image likely have NaNs
+- You can mark "bad pixels" produced by your camera.
+
+
+## API
+
+The major functions/types exported by this module are:
+
+- `blocksize` and `gridsize`:
+- `Block`: a special-purpose SubArray where slicing occurs along the
+  trailing dimensions
+- `NumDenom` and `pack_nd`: packed pair representation of
+  `(num,denom)` mismatch data.
+- `indminmismatch`: a utility function for finding the location of the
+  minimum mismatch
+- `ind2disp` and `ind2disp!`: convert linear-indexing
+  minimum-locations (from `indminmismatch`) into cartesian
+  *displacements*
+- `MismatchData` and `save`: utilities for disk storage of mismatch data.
 
 """
-`NumDenom{T}` is a 2-vector containing a `(num,denom)` pair. This
-representation is efficient for `Interpolations.jl`, because it allows
-interpolation to be performed on "both arrays" at once without
+RegisterCore
+
+"""
+`NumDenom{T}` is a 2-vector containing a `(num,denom)` pair.  If `x`
+is a `NumDenom`, `x.num` is `num` and `x.denom` is `denom`.
+
+This representation is efficient for `Interpolations.jl`, because it
+allows interpolation to be performed on "both arrays" at once without
 recomputing the interpolation coefficients.
 """
 immutable NumDenom{T<:Number}
@@ -76,8 +230,9 @@ end
 ### Block, a type to simplify working with tiled arrays
 ###
 """
-`B = Block(A, i, j)` returns a slice of `A`.  If `A` is a 5-dimensional array,
-`Block(A, i, j)` will return a view of `A[:,:,:,i,j]`.  These can be viewed as special-purpose SubArrays.
+`B = Block(A, i, j)` returns a slice of `A`.  If `A` is a
+5-dimensional array, `Block(A, i, j)` will return a view of
+`A[:,:,:,i,j]`.  These can be viewed as special-purpose SubArrays.
 """
 immutable Block{T,N,NE,A<:DenseArray} <: DenseArray{T,N}
     parent::A
@@ -165,7 +320,6 @@ blockeltype(ND::Tuple) = blockeltype(ND[1])
 
 #### MismatchData ####
 """
-
 `MismatchData` is designed as an accessor for a file format, although
 it can be used in-memory as well. The most important fields are:
 

@@ -12,6 +12,54 @@ typealias DimsLike Union(Vector{Int}, Dims)
 typealias InterpExtrap Union(AbstractInterpolation,AbstractExtrapolation)
 typealias Extrapolatable{T,N} Union(TransformedArray{T,N},AbstractExtrapolation{T,N})
 
+"""
+# RegisterDeformation
+
+A deformation (or warp) of space is represented by a function `u(x)`,
+where pixel values of an image `img` are "looked up" at a location `x
+-> x + u(x)`.  `u(x)` thus expresses the displacement, in pixels, at
+position `x`.  Note that a constant deformation, `u(x) = x0`,
+corresponds to a shift of the *coordinates* by `x0`, and therefore a
+shift of the *image* in the opposite direction.
+
+In reality, deformations will be represented on a grid, and
+interpolation is implied at locations between grid points. Given an
+image of size `imsize`, the "control points" of the grid are assumed
+to be equally spaced, with the first and last at the corners of the
+image.
+
+There are two main representations of `u`:
+
+- Packed single-array representation: `u[dim, i, j]` is the
+  displacement along coordinate `dim` for grid point `i,j`. `u[:,i,j]`
+  is the vector of displacements.
+- Multi-coordinate representation: the deformation is expressed as a
+  collection of arrays, `u1, ..., ud` in `d` dimensions. `u1[i,j]` is
+  the displacement along coordinate 1 for grid point `i,j`.
+
+For image registration, deformations are closely coupled to the
+mismatch.  `u[:,i,j,...]` corresponds to a particular location in the
+`i,j,...` block of the `nums`, `denoms` arrays. For example, when
+`u[:,i,j,...] = 0`, it corresponds to the element in the center; when
+`u` has fractional values, the mismatch will be interpolated. A key
+constraint is that, for the mismatch to be well-defined at a
+particular `u`, we require `|u| <= maxshift-0.5`, where the 0.5 arises
+from the need to perform quadratic interpolation. When `u` does not
+satisfy this condition, you may trigger an error indicating that the
+mismatch does not have a finite value.
+
+The major functions/types exported by RegisterDeformation are:
+
+    - `warp` and `warp!`: deform an image
+    - `WarpedArray`: create a deformed array lazily
+    - `warpgrid`: visualize a deformation
+    - `tform2u`: convert an `AffineTransform` to a deformation
+    - `uarray2coords` and `ucoords2array`: convert between the two represenations of `u`
+
+See also: `compose_u` for composition of two deformations.
+"""
+RegisterDeformation
+
 ### WarpedArray
 """
 A `WarpedArray` `W` is an AbstractArray for which `W[x,y,...] = A[g_x(x,y,...), g_y(x,y,...), ...]` for some parent array `A` and some deformation `(g_x, g_y, ...)`.  The object is created lazily, meaning that computation of the displaced values occurs only when you ask for them explicitly.
@@ -19,11 +67,13 @@ A `WarpedArray` `W` is an AbstractArray for which `W[x,y,...] = A[g_x(x,y,...), 
 Create a `WarpedArray` like this:
 
 ```
-W = WarpedArray((u_x, u_y, ...), A)
+W = WarpedArray(A, (u_x, u_y, ...))
 ```
 where
 
-- The first argument, `(u_x,u_y,...)`, specifies the deformation. It
+- The first argument `A` is an `AbstractExtrapolation` that can be
+  evaluated anywhere.  See the Interpolations package.
+- The second argument, `(u_x,u_y,...)`, specifies the deformation. It
   must be encoded as a difference from the identity deformation (i.e.,
   no deformation), `g_x(x,y,...) = x + u_x(x,y,...)`.  `u_i` expresses
   the number of pixels of shift along dimension `i` at the evaluation
@@ -31,8 +81,6 @@ where
   `AbstractInterpolation` or as an N-dimensional array which is
   assumed to span "corner-to-corner" the whole array `A`. In the
   latter case, the `u_i` will use quadratic interpolation.
-- The second argument `A` is an `AbstractExtrapolation` that can be
-  evaluated anywhere.  See the Interpolations package.
 
 """
 type WarpedArray{T,N,U<:InterpExtrap,A<:Extrapolatable} <: AbstractArray{T,N}
@@ -87,7 +135,16 @@ end
 
 getindex!(dest, W::WarpedArray, coords...) = Base._unsafe_getindex!(dest, Base.LinearSlow(), W, coords...)
 
+"""
+`Atrans = translate(A, displacement)` shifts `A` by an amount
+specified by `displacement`.  Specifically, in simple cases `Atrans[i,
+j, ...] = A[i+displacement[1], j+displacement[2], ...]`.  More
+generally, `displacement` is applied only to the spatial coordinates
+of `A`; if `A` is an `Image`, dimensions marked as time or color are
+unaffected.
 
+`NaN` is filled in for any missing pixels.
+"""
 function translate(A::AbstractArray, displacement::DimsLike)
     disp = zeros(Int, ndims(A))
     disp[coords_spatial(A)] = displacement
@@ -95,6 +152,15 @@ function translate(A::AbstractArray, displacement::DimsLike)
     get(A, indx, NaN)
 end
 
+"""
+`u = tform2u(tform, arraysize, gridsize)` constructs a deformation
+grid `u` from the affine transform `tform` suitable for warping arrays
+of size `arraysize`.  The origin-of-coordinates for `tform` is the
+center of the array, meaning that if `tform` is a pure rotation the
+array "spins" around its center.  The array of grid points in `u` has
+size specified by `gridsize`.  The dimensionality of `tform` must
+match that specified by `arraysize` and `gridsize`.
+"""
 function tform2u{T,N}(tform::AffineTransform{T,N}, arraysize, gridsize)
     if length(arraysize) != N || length(gridsize) != N
         error("Dimensionality mismatch")
@@ -113,6 +179,11 @@ function tform2u{T,N}(tform::AffineTransform{T,N}, arraysize, gridsize)
     return reshape(u, N, gridsize...)
 end
 
+"""
+`(u1,u2...) = uarray2coords(u)` converts the array representation of
+`u` (of size `(ndims, sz...)`) into a `ndims` tuple of arrays of size
+`sz`.
+"""
 function uarray2coords(u)
     nd = size(u,1)
     if size(u, nd+2) > 1
@@ -122,6 +193,10 @@ function uarray2coords(u)
     ucoords = ntuple(i->squeeze(u[i,rng...], 1), size(u,1))
 end
 
+"""
+`u = ucoords2array((u1,u2...))` converts the tuple-representation of
+of a deformation into an array `u` of size `(ndims, sz...)`.
+"""
 function ucoords2array(ucoords::Tuple)
     nd = length(ucoords)
     gridsize = size(ucoords[1])
@@ -133,29 +208,62 @@ function ucoords2array(ucoords::Tuple)
     uarray
 end
 
+"""
+`wimg = warp(img, u)` warps the array `img` according to the
+deformation `u`, represented as an array.
+
+`wimg = warp(img, ucoords...)` parametrizes the deformation as a
+tuple-of-arrays.
+"""
 function warp(img, ucoords...)
     if length(ucoords) == 1 && ndims(ucoords[1]) == ndims(img)+1
         ucoords = ucoords[1]
     end
     wimg = WarpedArray(img, ucoords)
-    ret = similar(img)
-    warp!(ret, wimg)
+    dest = similar(img)
+    warp!(dest, wimg)
 end
 
-function warp!(ret, wimg::WarpedArray)
+"""
+`warp!(dest, w::WarpedArray)` instantiates a `WarpedArray` in the output `dest`.
+"""
+function warp!(dest::AbstractArray, wimg::WarpedArray)
     for I in CartesianRange(size(wimg))
-        ret[I] = wimg[I]
+        dest[I] = wimg[I]
     end
-    ret
+    dest
 end
 
+
+"""
+`warp!(dest, img, ucoords...)` warps `img` using the deformation `ucoords`.  The result is stored in `dest`.
+"""
+function warp!(dest::AbstractArray, img::AbstractArray, ucoords...)
+    wimg = WarpedArray(to_etp(img), ucoords)
+    warp!(dest, wimg)
+end
+
+"""
+`warp!(dest, img, tform, ucoords...)` warps `img` using a combination of the affine transformation `tform` followed by deformation with `ucoords`.  The result is stored in `dest`.
+"""
 function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ucoords...)
     wimg = WarpedArray(to_etp(img, A), ucoords)
     warp!(dest, wimg)
 end
 
-# Create a visualization of the warp's affect on gridlines
-function warpgrid(u, imsz; normalized::Bool=false)
+"""
+`img = warpgrid(u, imsize; [normalized=false])` returns an image `img`
+that permits visualization of the deformation `u` (which must be in
+array representation).  The output is a warped rectangular grid with
+nodes centered on the control points as specified by the size of `u`
+(specifying the `gridsize`) and `imsize` (specifying the size of the
+fixed/moving images and `img`).
+
+If `normalize==true`, the values in `u` are interpreted as a fraction
+of the distance to the adjacent control point (i.e, scaled by the
+block size).
+"""
+function warpgrid(u::AbstractArray, imsz; normalized::Bool=false)
     length(imsz) == size(u,1) || throw(DimensionMismatch("u is for $(size(u,1)) dimensions, but the image has $(length(imsz)) dimensions"))
     img = zeros(eltype(u), imsz)
     imsza = Any[imsz...]
