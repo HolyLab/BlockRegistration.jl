@@ -1,18 +1,36 @@
-# Note: not a module
+# Note: not a module, included into RegisterMismatch or RegisterMismatchCuda
 
-using RegisterCore, Compat
+using RegisterCore
 
-export defaultblocksize, highpass, truncatenoise!, mismatch0, mismatchcenter
+export nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_size, highpass, truncatenoise!
 
-typealias DimsLike Union(Vector{Int}, Dims)
+typealias DimsLike Union{AbstractVector{Int}, Dims}
+typealias WidthLike Union{AbstractVector,Tuple}
 
 mmtype(T) = typeof((one(T)+one(T))/1)
 
 """
-`num, denom = mismatch0(fixed, moving, [normalization])` computes the
+`fixedpad, movingpad = nanpad(fixed, moving)` will pad `fixed` and/or
+`moving` with NaN as needed to ensure that `fixedpad` and `movingpad`
+have the same size.
+"""
+function nanpad(fixed, moving)
+    ndims(fixed) == ndims(moving) || error("fixed and moving must have the same dimensionality")
+    if size(fixed) == size(moving)
+        return fixed, moving
+    end
+    rng = map(d->1:max(size(fixed,d), size(moving,d)), 1:ndims(fixed))
+    T = promote_type(eltype(fixed), eltype(moving))
+    get(fixed, rng, nanval(T)), get(moving, rng, nanval(T))
+end
+
+nanval{T<:AbstractFloat}(::Type{T}) = convert(T, NaN)
+nanval{T}(::Type{T}) = convert(Float32, NaN)
+
+"""
+`mm0 = mismatch0(fixed, moving, [normalization])` computes the
 "as-is" mismatch between `fixed` and `moving`, without any shift.
 `normalization` may be either `:intensity` (the default) or `:pixels`.
-The mean-square mismatch is `num/denom`.
 """
 function mismatch0{T,N}(fixed::AbstractArray{T,N}, moving::AbstractArray{T,N}; normalization = :intensity)
     size(fixed) == size(moving) || throw(DimensionMismatch("Size $(size(fixed)) of fixed is not equal to size $(size(moving)) of moving"))
@@ -38,76 +56,200 @@ function mismatch0{T,N}(fixed::AbstractArray{T,N}, moving::AbstractArray{T,N}; n
     else
         error("Normalization $normalization not recognized")
     end
-    num, denom
+    NumDenom(num, denom)
 end
 
 """
-`num0, denom0 = mismatchcenter(nums, denoms)` computes the "as-is"
+`mm0 = mismatch0(mms)` computes the "as-is"
 mismatch between `fixed` and `moving`, without any shift.  The
-mismatch is already computed "blockwise" and stored as the
-Arrays-of-Arrays `nums, denoms`. The outputs are the same as generated
-by `mismatch0`.
+mismatch is represented in `mms` as an aperture-wise
+Arrays-of-MismatchArrays.
 """
-function mismatchcenter(nums, denoms)
-    gsize = gridsize(nums)
-    num0 = denom0 = 0.0
-    for i = 1:prod(gsize)
-        s = ind2sub(gsize, i)
-        B = getblock(nums, s...)
-        l = length(B)
-        num0 += B[l>>1+1]
-        B = getblock(denoms, s...)
-        denom0 += B[l>>1+1]
+function mismatch0{M<:MismatchArray}(mms::AbstractArray{M})
+    mm0 = eltype(M)(0, 0)
+    cr = eachindex(first(mms))
+    z = cr.start+cr.stop  # all-zeros CartesianIndex
+    for mm in mms
+        mm0 += mm[z]
     end
-    num0, denom0
+    mm0
 end
 
-function defaultblocksize(img, gridsize::DimsLike, overlap::DimsLike = zeros(Int, ndims(img)))
+"""
+`ag = aperture_grid(ssize, gridsize)` constructs a uniformly-spaced
+grid of aperture centers.  The grid has size `gridsize`, and is
+constructed for an image of spatial size `ssize`.  Along each
+dimension the first and last elements are at the image corners.
+"""
+function aperture_grid(ssize, gridsize)
+    N = length(ssize)
+    length(gridsize) == N || error("ssize and gridsize must have the same length")
+    grid = Array(NTuple{N,Float64}, gridsize...)
+    centers = map(i-> gridsize[i] > 1 ? collect(linspace(1,ssize[i],gridsize[i])) : [(ssize[i]+1)/2], 1:N)
+    for I in CartesianRange(size(grid))
+        grid[I] = ntuple(i->centers[i][I[i]], N)
+    end
+    grid
+end
+
+"""
+`mms = allocate_mmarrays(T, aperture_centers, maxshift)` allocates
+storage for aperture-wise mismatch computation. `mms` will be an
+Array-of-MismatchArrays with element type `NumDenom{T}` and half-size
+`maxshift`, with the outer array having the same "grid" shape as
+`aperture_centers`.  The centers can in general be provided as an
+vector-of-tuples, vector-of-vectors, or a matrix with each point in a
+column.  If your centers are arranged in a rectangular grid, you can
+use an `N`-dimensional array-of-tuples (or array-of-vectors) or an
+`N+1`-dimensional array with the center positions specified along the
+first dimension.
+"""
+function allocate_mmarrays{T,C<:Union{AbstractVector,Tuple}}(::Type{T}, aperture_centers::AbstractArray{C}, maxshift)
+    isempty(aperture_centers) && error("aperture_centers is empty")
+    N = length(first(aperture_centers))
+    mms = Array(MismatchArray{NumDenom{T},N}, size(aperture_centers))
+    sz = map(x->2*x+1, maxshift)
+    for i in eachindex(mms)
+        mms[i] = MismatchArray(T, sz...)
+    end
+    mms
+end
+
+function allocate_mmarrays{T,R<:Real}(::Type{T}, aperture_centers::AbstractArray{R}, maxshift)
+    N = ndims(aperture_centers)-1
+    mms = Array(MismatchArray{T,N}, size(aperture_centers)[2:end])
+    sz = map(x->2*x+1, maxshift)
+    for i in eachindex(mms)
+        mms[i] = MismatchArray(T, sz...)
+    end
+    mms
+end
+
+immutable ContainerIterator{C}
+    data::C
+end
+
+Base.start(iter::ContainerIterator) = start(iter.data)
+Base.done(iter::ContainerIterator, state) = done(iter.data, state)
+Base.next(iter::ContainerIterator, state) = next(iter.data, state)
+
+immutable FirstDimIterator{A<:AbstractArray,R<:CartesianRange}
+    data::A
+    rng::R
+
+    FirstDimIterator(data) = new(data, CartesianRange(Base.tail(size(data))))
+end
+FirstDimIterator(A::AbstractArray) = FirstDimIterator{typeof(A),typeof(CartesianRange(Base.tail(size(A))))}(A)
+
+Base.start(iter::FirstDimIterator) = start(iter.rng)
+Base.done(iter::FirstDimIterator, state) = done(iter.rng, state)
+function Base.next(iter::FirstDimIterator, state)
+    index, state = next(iter.rng, state)
+    iter.data[:, index], state
+end
+
+"""
+`iter = each_point(points)` yields an iterator `iter` over all the
+points in `points`. `points` may be represented as an
+AbstractArray-of-tuples or -AbstractVectors, or may be an
+`AbstractArray` where each point is represented along the first
+dimension (e.g., columns of a matrix).
+"""
+each_point{C<:Union{AbstractVector,Tuple}}(aperture_centers::AbstractArray{C}) = ContainerIterator(aperture_centers)
+
+each_point{R<:Real}(aperture_centers::AbstractArray{R}) = FirstDimIterator(aperture_centers)
+
+"""
+`rng = aperture_range(center, width)` returns a tuple of
+`UnitRange{Int}`s that, for dimension `d`, is centered on `center[d]`
+and has width `width[d]`.
+"""
+function aperture_range(center, width)
+    length(center) == length(width) || error("center and width must have the same length")
+    ntuple(d->leftedge(center[d], width[d]):rightedge(center[d], width[d]), length(center))
+end
+
+"""
+`aperturesize = default_aperture_width(img, gridsize, [overlap])`
+calculates the aperture width for a regularly-spaced grid of aperture
+centers with size `gridsize`.  Apertures that are adjacent along
+dimension `d` may overlap by a number pixels specified by
+`overlap[d]`; the default value is 0.  For non-negative `overlap`, the
+collection of apertures will yield full coverage of the image.
+"""
+function default_aperture_width(img, gridsize::DimsLike, overlap::DimsLike = zeros(Int, sdims(img)))
     sc = coords_spatial(img)
+    length(sc) == length(gridsize) == length(overlap) || error("gridsize and overlap must have length equal to the number of spatial dimensions in img")
     for i = 1:length(sc)
         if gridsize[i] > size(img, sc[i])
             error("gridsize is too large, given the size of the image")
         end
     end
     gsz1 = max(1,[gridsize...].-1)
-    tmp = [size(img)[sc]...]./gsz1
-    tuple([ceil(Int, t) for t in tmp] + [overlap...].*([gridsize...].>1)...)
+    gflag = [gridsize...].>1
+    tuple((([size(img)[sc]...]-gflag)./gsz1+2*[overlap...].*gflag)...)
 end
 
-function highpass(data, sigma; astype=Float64)
+"""
+`datahp = highpass([T], data, sigma)` returns a highpass-filtered
+version of `data`, with all negative values truncated at 0.  The
+highpass is computed by subtracting a lowpass-filtered version of
+data, using Gaussian filtering of width `sigma`.  As it is based on
+`Image.jl`'s Gaussian filter, it gracefully handles `NaN` values.
+
+If you do not wish to highpass-filter along a particular axis, put
+`Inf` into the corresponding slot in `sigma`.
+
+You may optionally specify the element type of the result, which for
+`Integer` or `FixedPoint` inputs defaults to `Float32`.
+"""
+function highpass{T}(::Type{T}, data::AbstractArray, sigma)
     sigmav = [sigma...]
     if any(isinf(sigmav))
-        datahp = convert(Array{astype,ndims(data)}, data)
+        datahp = convert(Array{T,ndims(data)}, data)
     else
-        datahp = data - imfilter_gaussian(data, sigmav, astype=astype)
+        datahp = data - imfilter_gaussian(data, sigmav, astype=T)
     end
     datahp[datahp .< 0] = 0  # truncate anything below 0
     datahp
 end
+highpass{T<:AbstractFloat}(data::AbstractArray{T}, sigma) = highpass(T, data, sigma)
+highpass(data::AbstractArray, sigma) = highpass(Float32, data, sigma)
 
-function truncatenoise!{T<:Real}(num::AbstractArray{T}, denom::AbstractArray{T}, thresh::Real)
-    for j = 1:length(denom)
-        if abs(denom[j]) <= thresh
-            num[j] = 0
-            denom[j] = 0
+"""
+`truncatenoise!(mm, thresh)` zeros out any entries of the
+MismatchArray `mm` whose `denom` values are less than `thresh`.
+"""
+function truncatenoise!{T<:Real}(mm::AbstractArray{NumDenom{T}}, thresh::Real)
+    for I in eachindex(mm)
+        if mm[I].denom <= thresh
+            mm[I] = NumDenom{T}(0,0)
         end
     end
-    nothing
+    mm
 end
 
-function truncatenoise!{A<:AbstractArray}(nums::Array{A}, denoms::Array{A}, thresh::Real)
+function truncatenoise!{A<:MismatchArray}(mms::AbstractArray{A}, thresh::Real)
     for i = 1:length(denoms)
-        truncatenoise!(nums[i], denoms[i], thresh)
+        truncatenoise!(mms[i], thresh)
     end
     nothing
 end
 
+"""
+`shift = register_translate(fixed, moving, maxshift, [thresh])`
+computes the integer-valued translation which best aligns images
+`fixed` and `moving`. All shifts up to size `maxshift` are considered.
+Optionally specify `thresh`, the fraction (0<=thresh<=1) of overlap
+required between `fixed` and `moving` (default 0.25).
+"""
 function register_translate(fixed, moving, maxshift, thresh=nothing)
-    num, denom = mismatch(fixed, moving, maxshift)
+    mm = mismatch(fixed, moving, maxshift)
+    _, denom = separate(mm)
     if thresh==nothing
-        thresh = 0.01maximum(denom)
+        thresh = 0.25maximum(denom)
     end
-    ind2disp(size(num), indminmismatch(num, denom, thresh))
+    indmin_mismatch(mm, thresh)
 end
 
 
@@ -146,17 +288,6 @@ function padsize(blocksize, maxshift, dim)
     m = maxshift[dim]
     p = blocksize[dim] + 2m
     return m > 0 ? (dim == 1 ? nextpow2(p) : nextprod(FFTPROD, p)) : p   # we won't FFT along dimensions with maxshift[i]==0
-end
-
-function blockspan(img, blocksize, gridsize)
-    imgssz = size(img)[coords_spatial(img)]
-    overlap = computeoverlap(imgssz, blocksize, gridsize)
-    N = length(imgssz)
-    centers = Vector{Int}[ gridsize[i] > 1 ? round(Int, linspace(1,imgssz[i],gridsize[i])) : [imgssz[i]>>1] for i = 1:N ]
-    blk = [b>>1 for b in blocksize]
-    lower = Vector{Int}[ centers[i].-blk[i].+1 for i = 1:N ]
-    upper = Vector{Int}[ min(centers[i].+blk[i].+1, [lower[i][2:end].-1.+overlap[i];typemax(Int)]) for i = 1:N]
-    lower, upper
 end
 
 function assertsamesize(A, B)
@@ -223,6 +354,9 @@ function computeoverlap(imgssz, blocksize, gridsize)
     tmp = [imgssz...]./gsz1
     blocksize - [ceil(Int, x) for x in tmp]
 end
+
+leftedge(center, width) = ceil(Int, center-width/2)
+rightedge(center, width) = leftedge(center+width, width) - 1
 
 # These avoid making a copy if it's not necessary
 tovec(v::AbstractVector) = v

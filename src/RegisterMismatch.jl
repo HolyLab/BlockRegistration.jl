@@ -15,13 +15,23 @@ export
     fillfixed!,
     mismatch,
     mismatch!,
-    mismatch_blocks,
-    mismatch_blocks!
+    mismatch_apertures,
+    mismatch_apertures!
 
-if !isdefined(:A_mul_B!)
-    const A_mul_B! = A_mul_B
-    const A_mul_Bt! = A_mul_Bt
-end
+"""
+The major types and functions exported are:
+
+- `mismatch` and `mismatch!`: compute the mismatch between two images
+- `mismatch_apertures` and `mismatch_apertures!`: compute apertured mismatch between two images
+- `mismatch0`: simple direct mismatch calculation with no shift
+- `nanpad`: pad the smaller image with NaNs
+- `highpass`: highpass filter an image
+- `truncatenoise!`: threshold mismatch computation to prevent problems from roundoff
+- `aperture_grid`: create a regular grid of apertures
+- `allocate_mmarrays`: create storage for output of `mismatch_apertures!`
+- `CMStorage`: a type that facilitates re-use of intermediate storage during registration computations
+"""
+RegisterMismatch
 
 FFTW.set_num_threads(min(CPU_CORES, 8))
 const FFTPROD = [2,3]
@@ -34,10 +44,15 @@ end
 
 copy(x::NanCorrFFTs) = NanCorrFFTs(copy(x.I0), copy(x.I1), copy(x.I2))
 
-# A type that allows you to pre-allocate buffers for intermediate computations,
-# and pre-plan the FFTs.
+"""
+`CMStorage(T, aperture_width, maxshift; [flags=FFTW.ESTIMATE],
+[timelimit=Inf], [display=true])` prepares for FFT-based mismatch
+computations over domains of size `aperture_width`, computing the
+mismatch up to shifts of size `maxshift`.  The keyword arguments allow
+you to control the planning process for the FFTs.
+"""
 type CMStorage{T<:AbstractFloat,N}
-    blocksize::Vector{Int}
+    aperture_width::Vector{Float64}
     maxshift::Vector{Int}
     getindexes::Vector{UnitRange{Int}}   # indexes for pulling padded data, in source-coordinates
     padded::Array{T,N}
@@ -50,7 +65,8 @@ type CMStorage{T<:AbstractFloat,N}
     ifftfunc!::Function
     shiftindexes::Vector{Vector{Int}} # indexes for performing fftshift & snipping from -maxshift:maxshift
 
-    function CMStorage(::Type{T}, blocksize::DimsLike, maxshift::DimsLike; flags=FFTW.ESTIMATE, timelimit=Inf, display=true)
+    function CMStorage(::Type{T}, aperture_width::WidthLike, maxshift::DimsLike; flags=FFTW.ESTIMATE, timelimit=Inf, display=true)
+        blocksize = map(x->ceil(Int,x), aperture_width)
         length(blocksize) == length(maxshift) || error("Dimensionality mismatch")
         padsz = padsize(blocksize, maxshift)
         padszt = tuple(padsz...)
@@ -75,35 +91,50 @@ type CMStorage{T<:AbstractFloat,N}
             @printf("done (%.2f seconds)\n", dt)
         end
         shiftindexes = Vector{Int}[ [size(padded,i)+(-maxshift[i]+1:0); 1:maxshift[i]+1] for i = 1:length(maxshift) ]
-        new([blocksize...], maxshiftv, getindexes, padded, fixed, moving, buf1, buf2, fftfunc, ifftfunc, shiftindexes)
+        new(Float64[aperture_width...], maxshiftv, getindexes, padded, fixed, moving, buf1, buf2, fftfunc, ifftfunc, shiftindexes)
     end
 end
-CMStorage{T<:Real}(::Type{T}, blocksize, maxshift; kwargs...) = CMStorage{T,length(blocksize)}(T, blocksize, maxshift; kwargs...)
+CMStorage{T<:Real}(::Type{T}, aperture_width, maxshift; kwargs...) = CMStorage{T,length(aperture_width)}(T, aperture_width, maxshift; kwargs...)
 
 eltype{T,N}(cms::CMStorage{T,N}) = T
  ndims{T,N}(cms::CMStorage{T,N}) = N
 
-#### Compute the mismatch between two images as a function of the shift ####
-function mismatch{T<:Real}(fixed::AbstractArray{T}, moving::AbstractArray{T}, maxshift::DimsLike; normalization = :intensity, resulttype = Float64)
+"""
+`mm = mismatch([T], fixed, moving, maxshift;
+[normalization=:intensity])` computes the mismatch between `fixed` and
+`moving` as a function of translations (shifts) up to size `maxshift`.
+Optionally specify the element-type of the mismatch arrays (default
+`Float32` for Integer- or FixedPoint-valued images) and the
+normalization scheme (`:intensity` or `:pixels`).
+
+`fixed` and `moving` must have the same size; you can pad with
+`NaN`s as needed. See `nanpad`.
+"""
+function mismatch{T<:Real}(::Type{T}, fixed::AbstractArray, moving::AbstractArray, maxshift::DimsLike; normalization = :intensity)
     assertsamesize(fixed, moving)
     maxshiftv = tovec(maxshift)
     msz = 2maxshiftv.+1
-    num   = Array(resulttype, msz...)
-    denom = Array(resulttype, msz...)
-    cms = CMStorage(resulttype, size(fixed), maxshiftv)
+    mm = MismatchArray(T, msz...)
+    cms = CMStorage(T, size(fixed), maxshiftv)
     fillfixed!(cms, fixed)
-    mismatch!(num, denom, cms, moving, normalization=normalization)
-    return num, denom
+    mismatch!(mm, cms, moving, normalization=normalization)
+    return mm
 end
+mismatch{T<:AbstractFloat}(fixed::AbstractArray{T}, moving::AbstractArray{T}, maxshift::DimsLike; normalization = :intensity) = mismatch(T, fixed, moving, maxshift; normalization=normalization)
+mismatch(fixed::AbstractArray, moving::AbstractArray, maxshift::DimsLike; normalization = :intensity) = mismatch(Float32, fixed, moving, maxshift; normalization=normalization)
 
-function mismatch!{T<:Real}(num::AbstractArray, denom::AbstractArray, cms::CMStorage{T}, moving::AbstractArray; normalization = :intensity)
+"""
+`mismatch!(mm, cms, moving; [normalization=:intensity])`
+computes the mismatch as a function of shift, storing the result in
+`mm`. The `fixed` image has been prepared in `cms`, a `CMStorage` object.
+"""
+function mismatch!(mm::MismatchArray, cms::CMStorage, moving::AbstractArray; normalization = :intensity)
     # Pad the moving snippet using any available data, including
     # regions that might be in the parent Array but are not present
     # within the boundaries of the SubArray. Use NaN only for pixels
     # truly lacking data.
-    checksize_maxshift(num, cms.maxshift)
-    checksize_maxshift(denom, cms.maxshift)
-    safe_get!(cms.padded, data(moving), tuple(cms.getindexes...), NaN)
+    checksize_maxshift(mm, cms.maxshift)
+    safe_get!(cms.padded, data(moving), tuple(cms.getindexes...), convert(eltype(cms), NaN))
     fftnan!(cms.moving, cms.padded, cms.fftfunc!)
     # Compute the mismatch
     f0 = complex(cms.fixed.I0)
@@ -131,50 +162,85 @@ function mismatch!{T<:Real}(num::AbstractArray, denom::AbstractArray, cms::CMSto
     end
     cms.ifftfunc!(cms.buf1)
     cms.ifftfunc!(cms.buf2)
-    getindex!(num,   real(cms.buf1), cms.shiftindexes...)
-    getindex!(denom, real(cms.buf2), cms.shiftindexes...)
-    nothing
+    copy!(mm, (sub(real(cms.buf1), cms.shiftindexes...), sub(real(cms.buf2), cms.shiftindexes...)))
+    mm
 end
 
-#### Compute the mismatch across blocks of the images ####
-function mismatch_blocks(fixed::AbstractArray, moving::AbstractArray, gridsize::DimsLike, maxshift::DimsLike;
-                         overlap::DimsLike = zeros(Int, ndims(fixed)),
-                         blocksize::DimsLike = defaultblocksize(fixed, gridsize, overlap),
-                         resulttype = Float64,
-                         normalization = :intensity,
-                         flags = FFTW.MEASURE,
-                         kwargs...)
+"""
+`mms = mismatch_apertures([T], fixed, moving, aperture_centers,
+aperture_width, maxshift; [normalization=:intensity], [flags=FFTW.MEASURE],
+kwargs...)` computes the mismatch between `fixed` and `moving` over a
+list of apertures of size `aperture_width` at positions defined by
+`aperture_centers`.  The maximum-allowed shift in any aperture is
+`maxshift`.
+
+`mms = mismatch_apertures([T], fixed, moving, gridsize, maxshift;
+kwargs...)` performs the same calculation using a regularly-spaced
+grid of aperture centers.
+
+`fixed` and `moving` must have the same size; you can pad with `NaN`s
+as needed to ensure this.  You can optionally specify the real-valued
+element type mm; it defaults to the element type of `fixed` and
+`moving` or, for Integer- or FixedPoint-valued images, `Float32`.
+
+On output, `mms` will be an Array-of-MismatchArrays, with the outer
+array having the same "grid" shape as `aperture_centers`.  The centers
+can in general be provided as an vector-of-tuples, vector-of-vectors,
+or a matrix with each point in a column.  If your centers are arranged
+in a rectangular grid, you can use an `N`-dimensional array-of-tuples
+(or array-of-vectors) or an `N+1`-dimensional array with the center
+positions specified along the first dimension. See `aperture_grid`.
+"""
+function mismatch_apertures{T}(::Type{T},
+                               fixed::AbstractArray,
+                               moving::AbstractArray,
+                               aperture_centers::AbstractArray,
+                               aperture_width::WidthLike,
+                               maxshift::DimsLike;
+                               normalization = :intensity,
+                               flags = FFTW.MEASURE,
+                               kwargs...)
     nd = sdims(fixed)
     assertsamesize(fixed,moving)
-    (length(gridsize) <= nd && length(maxshift) <= nd) || error("Dimensionality mismatch")
-    nums   = Array(Array{resulttype, nd}, gridsize...)
-    denoms = Array(Array{resulttype, nd}, gridsize...)
-    maxshiftv = tovec(maxshift)
-    t = tuple(2maxshiftv.+1...)
-    for i = 1:prod(gridsize)
-        nums[i]   = Array(resulttype, t)
-        denoms[i] = Array(resulttype, t)
-    end
-    cms = CMStorage(resulttype, blocksize, maxshiftv; flags=flags, kwargs...)
-    mismatch_blocks!(nums, denoms, fixed, moving, cms, normalization=normalization)
-    nums, denoms
+    (length(aperture_width) == nd && length(maxshift) == nd) || error("Dimensionality mismatch")
+    mms = allocate_mmarrays(T, aperture_centers, maxshift)
+    cms = CMStorage(T, aperture_width, maxshift; flags=flags, kwargs...)
+    mismatch_apertures!(mms, fixed, moving, aperture_centers, cms, normalization=normalization)
+    mms
+end
+mismatch_apertures{T<:AbstractFloat}(fixed::AbstractArray{T}, moving::AbstractArray{T}, args...; kwargs...) = mismatch_apertures(T, fixed, moving, args...; kwargs...)
+mismatch_apertures(fixed::AbstractArray, moving::AbstractArray, args...; kwargs...) = mismatch_apertures(Float32, fixed, moving, args...; kwargs...)
+
+function mismatch_apertures{T}(::Type{T}, fixed::AbstractArray, moving::AbstractArray, gridsize::DimsLike, maxshift::DimsLike; kwargs...)
+    cs = coords_spatial(fixed)
+    aperture_centers = aperture_grid(size(fixed)[cs], gridsize)
+    aperture_width = default_aperture_width(fixed, gridsize)
+    mismatch_apertures(T, fixed, moving, aperture_centers, aperture_width, maxshift; kwargs...)
 end
 
-function mismatch_blocks!(nums, denoms, fixed, moving, cms; normalization=:intensity)
+"""
+`mismatch_apertures!(mms, fixed, moving, aperture_centers, cms;
+[normalization=:intensity])` computes the mismatch between `fixed` and
+`moving` over a list of apertures at positions defined by
+`aperture_centers`.  The parameters and working storage are contained
+in `cms`, a `CMStorage` object. The results are stored in `mms`, an
+Array-of-MismatchArrays which must have length equal to the number of
+aperture centers.
+"""
+function mismatch_apertures!(mms, fixed, moving, aperture_centers, cms; normalization=:intensity)
     assertsamesize(fixed, moving)
     N = ndims(cms)
-    gsize = gridsize(nums)
-    lower, upper = blockspan(fixed, cms.blocksize, gsize)
-    for k = 1:prod(gsize)
-        c = ind2sub(gsize, k)
-        # Create snippets
-        rng = UnitRange{Int}[ lower[i][c[i]]:upper[i][c[i]] for i = 1:N ]
-	fsnip = Base.sub_unsafe(data(fixed), tuple(rng...)) #sub throws an error in 0.4 when rng extends outside of bounds, see github #10296
-        msnip = Base.sub_unsafe(data(moving), tuple(rng...))
+    for (mm,center) in zip(mms, each_point(aperture_centers))
+        rng = aperture_range(center, cms.aperture_width)
+        # sub throws an error in 0.4 when rng extends outside of
+        #    bounds, see julia #10296.
+	fsnip = Base.sub_unsafe(data(fixed), rng)
+        msnip = Base.sub_unsafe(data(moving), rng)
         # Perform the calculation
         fillfixed!(cms, fsnip)
-        mismatch!(getblock(nums, c...), getblock(denoms, c...), cms, msnip; normalization=normalization)
+        mismatch!(mm, cms, msnip; normalization=normalization)
     end
+    mms
 end
 
 # Calculate the components needed to "nancorrelate"
@@ -211,13 +277,13 @@ end
 function fillfixed!{T}(cms::CMStorage{T}, fixed::SubArray)
     fill!(cms.padded, NaN)
     X = sub(cms.padded, ntuple(d->(1:size(fixed,d))+cms.maxshift[d], ndims(fixed)))
-    get!(X, parent(fixed), parentindexes(fixed), NaN)
+    get!(X, parent(fixed), parentindexes(fixed), convert(T, NaN))
     fftnan!(cms.fixed, cms.padded, cms.fftfunc!)
 end
 
 #### Utilities
 
-isnan{T}(A::Array{Complex{T}}) = isnan(real(A)) | isnan(imag(A))
+Base.isnan{T}(A::Array{Complex{T}}) = isnan(real(A)) | isnan(imag(A))
 function sumsq_finite(A)
     s = 0.0
     for a in A

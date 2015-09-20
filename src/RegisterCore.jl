@@ -167,7 +167,7 @@ The major functions/types exported by this module are:
 
 - `NumDenom` and `MismatchArray`: packed pair representation of
   `(num,denom)` mismatch data
-- `separate`: splits a `MismatchArray` into its component `num,denom` arrays
+- `separate`: splits a `NumDenom` array into its component `num,denom` arrays
 - `indmin_mismatch`: find the location of the minimum mismatch
 
 """
@@ -244,9 +244,8 @@ function _packnd!(numdenom::CenterIndexedArray, num::CenterIndexedArray, denom::
 end
 
 """
-`num, denom = separate(mmd)` splits a `MismatchArray` into separate
-numerator and denominator arrays.  The outputs are
-CenterIndexedArrays.
+`num, denom = separate(mm)` splits an `AbstractArray{NumDenom}` into separate
+numerator and denominator arrays.
 """
 function separate{T}(data::AbstractArray{NumDenom{T}})
     num = Array(T, size(data))
@@ -259,17 +258,17 @@ function separate{T}(data::AbstractArray{NumDenom{T}})
     num, denom
 end
 
-function separate(mmd::MismatchArray)
-    num, denom = separate(mmd.data)
+function separate(mm::MismatchArray)
+    num, denom = separate(mm.data)
     CenterIndexedArray(num), CenterIndexedArray(denom)
 end
 
-function separate{M<:MismatchArray}(mmda::AbstractArray{M})
+function separate{M<:MismatchArray}(mma::AbstractArray{M})
     T = eltype(eltype(M))
-    nums = Array(CenterIndexedArray{T,ndims(M)}, size(mmda))
+    nums = Array(CenterIndexedArray{T,ndims(M)}, size(mma))
     denoms = similar(nums)
-    for (i,mmd) in enumerate(mmda)
-        nums[i], denoms[i] = separate(mmd)
+    for (i,mm) in enumerate(mma)
+        nums[i], denoms[i] = separate(mm)
     end
     nums, denoms
 end
