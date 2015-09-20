@@ -1,25 +1,25 @@
-#__precompile__()
+__precompile__()
 
 module RegisterCore
 
 using CenterIndexedArrays
 using Base.Cartesian: @nloops, @nref, @ntuple
-using FileIO
+using Images
 
 import Base: +, -, *, /
 import Base: eltype, getindex, ndims, pointer, setindex!, show, size
 import Base: checksize, unsafe_getindex
-import FileIO: save
 import CenterIndexedArrays: CenterIndexedArray
+import Images: separate
 
 export
     # types
     MismatchArray,
-    MismatchData,
     NumDenom,
     # functions
-    save,
-    indminmismatch
+    maxshift,
+    indmin_mismatch,
+    separate
 
 """
 # RegisterCore
@@ -165,12 +165,10 @@ exist. This provides several nice features:
 
 The major functions/types exported by this module are:
 
-- `` and `gridsize`:
-- `NumDenom` and `pack_nd`: packed pair representation of
-  `(num,denom)` mismatch data.
-- `indminmismatch`: a utility function for finding the location of the
-  minimum mismatch
-- `MismatchData` and `save`: utilities for disk storage of mismatch data.
+- `NumDenom` and `MismatchArray`: packed pair representation of
+  `(num,denom)` mismatch data
+- `separate`: splits a `MismatchArray` into its component `num,denom` arrays
+- `indmin_mismatch`: find the location of the minimum mismatch
 
 """
 RegisterCore
@@ -198,222 +196,95 @@ end
 Base.one{T}(::Type{NumDenom{T}}) = NumDenom(one(T),one(T))
 Base.zero{T}(::Type{NumDenom{T}}) = NumDenom(zero(T),zero(T))
 Base.promote_rule{T1,T2<:Number}(::Type{NumDenom{T1}}, ::Type{T2}) = NumDenom{promote_type(T1,T2)}
+Base.eltype{T}(::Type{NumDenom{T}}) = T
+Base.show(io::IO, p::NumDenom) = print(io, "NumDenom(", p.num, ",", p.denom, ")")
+function Base.showcompact(io::IO, p::NumDenom)
+    print(io, "NumDenom(")
+    showcompact(io, p.num)
+    print(io, ",")
+    showcompact(io, p.denom)
+    print(io, ")")
+end
 
-typealias MismatchArray{T<:Number,N} CenterIndexedArray{NumDenom{T},N}
+typealias MismatchArray{ND<:NumDenom,N,A} CenterIndexedArray{ND,N,A}
+
+maxshift(A::MismatchArray) = A.halfsize
 
 """
-`numdenom = MismatchArray(nums, denoms)` packs the array-pair
-`(nums,denoms)` into a single `MismatchArray`.  This is useful
+`numdenom = MismatchArray(num, denom)` packs the array-pair
+`(num,denom)` into a single `MismatchArray`.  This is useful
 preparation for interpolation.
 """
-function Base.call{M<:MismatchArray}(::Type{M}, nums::AbstractArray, denoms::AbstractArray)
-    size(nums) == size(denoms) || throw(DimensionMismatch("nums and denoms must have the same size"))
-    T = promote_type(eltype(nums), eltype(denoms))
-    numdenom = Array(NumDenom{T}, size(nums))
-    @simd for I in eachindex(nums)
-        @inbounds numdenom[I] = NumDenom(nums[I], denoms[I])
-    end
-    CenterIndexedArray(numdenom)
+function Base.call{M<:MismatchArray}(::Type{M}, num::AbstractArray, denom::AbstractArray)
+    size(num) == size(denom) || throw(DimensionMismatch("num and denom must have the same size"))
+    T = promote_type(eltype(num), eltype(denom))
+    numdenom = CenterIndexedArray(NumDenom{T}, size(num))
+    _packnd!(numdenom, num, denom)
 end
 
-#### MismatchData ####
-"""
-`MismatchData` is designed as an accessor for a file format, although
-it can be used in-memory as well. The most important fields are:
-
-- `maxshift`, the maximum displacement along each axis for which
-  shifted mismatch data are available;
-- `gridsize`: a vector of length `ndims`, giving the size of the grid
-  of "control points"
-- `data`: a NumDenom array with the dimensions
-  `[2*maxshift+1;gridsize;nstacks]`, holding the mismatch `num/denom`
-  data.  For a 2d registration, this will be a 5-dimensional array
-  even if you only have two images you're registering.
-- `stacks`: a vector of stack indexes from the original images
-- `stack_base`: the stack index of the reference ("fixed") image
-"""
-type MismatchData{T,N}
-    data::Array{MismatchArray{T,N},N}
-    stack_base::Int
-    stacks::Vector{Int}
-    maxshift::Vector{Int}
-    gridsize::Vector{Int}
-    normalization::Char
-    key::Int32
-end
-MismatchData(data, stack_base, stacks, maxshift, gridsize, normalization) =
-    MismatchData(data, stack_base, stacks, maxshift, gridsize, normalization, Int32(0))
-
-"""
-`mmd = MismatchData(numdenoms; [normalization=:intensity],
-[stack_base=-1])` constructs a `MismatchData` object from a single
-fixed/moving image pair.
-"""
-function MismatchData(numdenoms::AbstractArray; normalization = :intensity, stack_base=-1)
-    error("FIXME")
-    gsize = gridsize(nums)
-    N = length(gsize)
-    numB = getblock(nums, ones(Int, N)...)
-    T = eltype(numB)
-    blocksize = size(numB)
-    data = Array(T, blocksize..., 2, gsize...)
-    rng = ntuple(i->1:blocksize[i], N)
-    for i = 1:prod(gsize)
-        t = ind2sub(gsize, i)
-        data[rng..., 1, i] = getblock(nums, t...)
-        data[rng..., 2, i] = getblock(denoms, t...)
+function _packnd!(numdenom::AbstractArray, num::AbstractArray, denom::AbstractArray)
+    @simd for I in eachindex(num)
+        @inbounds numdenom[I] = NumDenom(num[I], denom[I])
     end
-    MismatchData(data, stack_base, [1], [blocksize...], [gsize...], normalization==:intensity ? 'I' : 'P', Int32(0))
+    numdenom
 end
 
-#### MismatchData files ####
-"""
-`mmd = MismatchData(filename)` loads `MismatchData` from the specified file.
-"""
-function MismatchData(filename::AbstractString)
-    error("FIXME")
-    filename = endswith(filename, ".mismatch") ? filename : filename*".mismatch"
-    s = open(filename, "r");
-    magic = b"MISMATCH"
-    magic_check = read(s, UInt8, length(magic))
-    if magic_check != magic
-        error("The format of ", filename, " does not seem to be correct")
+function _packnd!(numdenom::CenterIndexedArray, num::AbstractArray, denom::AbstractArray)
+    @simd for I in eachindex(num)
+        @inbounds numdenom.data[I] = NumDenom(num[I], denom[I])
     end
-    version = read(s, Int32)
-    if version < 1 || version > 2
-        error("Version not recognized")
+    numdenom
+end
+
+function _packnd!(numdenom::CenterIndexedArray, num::CenterIndexedArray, denom::CenterIndexedArray)
+    @simd for I in eachindex(num)
+        @inbounds numdenom[I] = NumDenom(num[I], denom[I])
     end
-    stack_base = Int(read(s, Int32))
-    n_stacks = Int(read(s, Int32))
-    stacks = convert(Vector{Int}, read(s, Int32, n_stacks))
-    n_dims = Int(read(s, Int32))
-    gridsize = convert(Vector{Int}, read(s, Int32, n_dims))
-    blocksize = convert(Vector{Int}, read(s, Int32, n_dims))
-    if any(blocksize .< 1)
-        error(filename, " has incorrect block size; perhaps execution terminated prematurely?")
-    end
-    nbits = read(s, Int32)
-    if nbits == 32
-        T = Float32
-    elseif nbits == 64
-        T = Float64
-    else
-        error("Number of bits not recognized")
-    end
-    normint = read(s, Int32)
-    normchar = 'I'
-    if normint == 1
-    elseif normint == 2
-        normchar = 'P'
-    else
-        error("Normalization not recognized")
-    end
-    if version >= 2
-        key = read(s, Int32)
-    else
-        key = Int32(0)
-    end
-    offset = position(s)
-    # Check the file size
-    n_blocks = prod(gridsize)
-    n_pix = prod(blocksize)
-    fileszexpected = 2*n_stacks*n_pix*n_blocks*sizeof(T)+offset
-    filesz = filesize(filename)
-    if filesz != fileszexpected
-        error("File size ", filesz, " does not match the expected ", fileszexpected, " for file ", filename)
-    end
-    datasize = tuple(blocksize..., 2, gridsize..., n_stacks)
-    data = Mmap.mmap(s, Array{T,length(datasize)}, datasize, offset)
-    return MismatchData{T,ndims(data)}(data, stack_base, stacks, blocksize, gridsize, normchar, key)
+    numdenom
 end
 
 """
-`mmd = MismatchData(filenames::Vector)` loads `MismatchData` from a list of files.
+`num, denom = separate(mmd)` splits a `MismatchArray` into separate
+numerator and denominator arrays.  The outputs are
+CenterIndexedArrays.
 """
-function MismatchData(filenames::Vector{AbstractString})
-    mmd = MismatchData(filenames[1])
-    T = eltype(mmd)
-    mmd_all = Array(MismatchData{T}, length(filenames))
-    mmd_all[1] = mmd
-    for i = 2:length(filenames)
-        mmd = MismatchData(filenames[i])
-        if eltype(mmd) != T
-            error("All mismatch files must use the same data type")
-        end
-        mmd_all[i] = mmd
+function separate{T}(data::AbstractArray{NumDenom{T}})
+    num = Array(T, size(data))
+    denom = similar(num)
+    for I in eachindex(data)
+        nd = data[I]
+        num[I] = nd.num
+        denom[I] = nd.denom
     end
-    return mmd_all
+    num, denom
 end
 
-function write_header{T<:AbstractFloat}(s::IO, mmd::MismatchData{T})
-    error("FIXME")
-    magic = b"MISMATCH"
-    write(s, magic)
-    write(s, Int32(1))  # version
-    write(s, Int32(mmd.stack_base))
-    write(s, Int32(length(mmd.stacks)))
-    stacks32 = convert(Vector{Int32}, mmd.stacks)
-    write(s, stacks32)
-    write(s, Int32(length(mmd.gridsize)))
-    gridsize32 = convert(Vector{Int32}, mmd.gridsize)
-    write(s, gridsize32)
-    blocksize32 = convert(Vector{Int32}, mmd.blocksize)
-    write(s, blocksize32)
-    nbits = sizeof(T)*8
-    write(s, Int32(nbits))
-    if mmd.normalization == 'I'
-        write(s, Int32(1))
-    elseif mmd.normalization == 'P'
-        write(s, Int32(2))
-    else
-        error("Normalization not recognized")
+function separate(mmd::MismatchArray)
+    num, denom = separate(mmd.data)
+    CenterIndexedArray(num), CenterIndexedArray(denom)
+end
+
+function separate{M<:MismatchArray}(mmda::AbstractArray{M})
+    T = eltype(eltype(M))
+    nums = Array(CenterIndexedArray{T,ndims(M)}, size(mmda))
+    denoms = similar(nums)
+    for (i,mmd) in enumerate(mmda)
+        nums[i], denoms[i] = separate(mmd)
     end
+    nums, denoms
 end
 
-function create_mmd(filename::AbstractString)
-    ext = ".mismatch"
-    if !endswith(filename, ext)
-        filename = filename*ext
+Base.call{M<:MismatchArray,T}(::Type{M}, ::Type{T}, dims) = CenterIndexedArray(NumDenom{T}, dims)
+Base.call{M<:MismatchArray,T}(::Type{M}, ::Type{T}, dims...) = CenterIndexedArray(NumDenom{T}, dims)
+
+function Base.copy!(M::MismatchArray, nd::Tuple{AbstractArray, AbstractArray})
+    num, denom = nd
+    size(M) == size(num) == size(denom) || error("all sizes must match")
+    for (IM, Ind) in zip(eachindex(M), eachindex(num))
+        M[IM] = NumDenom(num[Ind], denom[Ind])
     end
-    s = open(filename, "w")
-    return s, filename
+    M
 end
-
-"""
-`save(filename, mmd::MismatchData)` writes `mmd` to the file specified
-by `filename`.  If not included, a `".mismatch"` extension will be
-added to the filename.
-"""
-function save(filename::AbstractString, mmd::MismatchData)
-    s, fname = create_mmd(filename)
-    write_header(s, mmd)
-    write(s, mmd.data)
-    close(s)
-end
-
-function append_mmd(s::IO, nums::AbstractArray, denoms::AbstractArray)
-    gsz = gridsize(nums)
-    for i = 1:prod(gsz)
-        t = ind2sub(gsz, i)
-        write(s, getblock(nums, t...))
-        write(s, getblock(denoms, t...))
-    end
-end
-
-normdict = Dict('I' => "intensity", 'P' => "pixels")
-
-#### MismatchData utilities ####
-function show(io::IO, mmd::MismatchData)
-    println(io, typeof(mmd), ":")
-    println(io, "  stack_base: ", mmd.stack_base)
-    print(io, "  stacks: ", mmd.stacks')
-    print(io, "  maxshift: ", mmd.maxshift')
-    print(io, "  gridsize:  ", mmd.gridsize')
-    print(io, "  normalization: ", mmd.normalization)
-end
-
-eltype{T}(mmd::MismatchData{T}) = T
-ndims{T,N}(mmd::MismatchData{T,N}) = N
 
 
 #### Utility functions ####
@@ -425,12 +296,14 @@ considers only those points for which `denom .> thresh`; moreover, it
 will never choose an edge point.  `index` is a CartesianIndex into the
 arrays.
 """
-@generated function indmin_mismatch{T,N}(numdenom::MismatchArray{T,N}, thresh::Real)
+@generated function indmin_mismatch(numdenom::MismatchArray, thresh::Real)
+    N = ndims(numdenom)
+    T = eltype(eltype(numdenom))
     icenter = ntuple(d->0, N)
     quote
         imin = $icenter   # default is center of the array
-        rmin = typemax(T)
-        threshT = convert(T, thresh)
+        rmin = typemax($T)
+        threshT = convert($T, thresh)
         halfsize = numdenom.halfsize
         @inbounds @nloops $N i d->-halfsize[d]+1:halfsize[d]-1 begin
             nd = @nref $N numdenom i
