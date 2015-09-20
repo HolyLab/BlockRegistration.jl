@@ -96,3 +96,4 @@ rand!(data)
 
 @test A + 1 == data + 1
 @test 2*A == 2*data
+@test A+A == data+data

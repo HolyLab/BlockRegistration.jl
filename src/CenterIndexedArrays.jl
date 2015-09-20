@@ -1,13 +1,16 @@
 __precompile__()
 
-# Note: this requires a patch to julia itself. See julia PR??.
+# Note: this requires a patch to julia itself. See julia PR#13203/#13235.
 
 module CenterIndexedArrays
 
-import Base: size, eachindex, getindex, setindex!, linearindexing, writemime
-import Base: ==, +, -, *, /, .+, .-, .*, ./
+using Images
+
+import Base: size, eachindex, getindex, setindex!, linearindexing
+import Base: ==, +, -, *, /, .+, .-, .*, ./, .\, .%, .<<, .>>, &, |, $
 import Base: isequal, maximum, minimum, cumsum, permutedims, ipermutedims
 import Base: mapslices, flipdim
+import Base: show, showcompact, writemime
 using Base.Cartesian
 
 export CenterIndexedArray
@@ -83,33 +86,63 @@ mapslices(f, A::CenterIndexedArray, dims::AbstractVector) = mapslices(f, A.data,
 flipdim{T}(A::CenterIndexedArray{T,1}, dim::Integer) = CenterIndexedArray(flipdim(A.data, dim))  # ambiguity
 flipdim(A::CenterIndexedArray, dim::Integer) = CenterIndexedArray(flipdim(A.data, dim))
 
-(+)(A::CenterIndexedArray{Bool},x::Bool) = CenterIndexedArray(A.data + x)
-(+)(x::Bool,A::CenterIndexedArray{Bool}) = CenterIndexedArray(x + A.data)
-(-)(A::CenterIndexedArray{Bool},x::Bool) = CenterIndexedArray(A.data - x)
-(-)(x::Bool,A::CenterIndexedArray{Bool}) = CenterIndexedArray(x - A.data)
+# The following definitions are needed to avoid ambiguity warnings
+for f in (:+, :-, :.+, :.-)
+    @eval begin
+        ($f)(A::CenterIndexedArray{Bool},x::Bool) = CenterIndexedArray($f(A.data, x))
+        ($f)(x::Bool, A::CenterIndexedArray{Bool}) = CenterIndexedArray($f(x, A.data))
+        ($f)(A::CenterIndexedArray{Bool}, B::CenterIndexedArray{Bool}) = CenterIndexedArray($f(A.data, B.data))
+        ($f)(A::CenterIndexedArray{Bool}, B::StridedArray{Bool}) = error("ambiguous container type")
+        ($f)(A::StridedArray{Bool}, B::CenterIndexedArray{Bool}) = error("ambiguous container type")
+    end
+end
+(.*){T<:Dates.Period}(A::CenterIndexedArray{T},x::Real) = CenterIndexedArray(A.data .* x)
+(.*){T<:Dates.Period}(x::Real,A::CenterIndexedArray{T}) = CenterIndexedArray(x .* A.data)
+(./){T<:Dates.Period}(A::CenterIndexedArray{T},x::Real) = CenterIndexedArray(A.data ./ x)
+(.%){T<:Dates.Period}(A::CenterIndexedArray{T},x::Integer) = CenterIndexedArray(A.data .% x)
+for op in (:.+, :.-, :+, :-)
+    @eval begin
+        ($op){P<:Dates.GeneralPeriod, Q<:Dates.GeneralPeriod}(X::CenterIndexedArray{P}, Y::CenterIndexedArray{Q}) = CenterIndexedArray($op(X.data, Y.data))
+        ($op){P<:Dates.GeneralPeriod, Q<:Dates.GeneralPeriod}(X::CenterIndexedArray{P}, Y::StridedArray{Q}) = error("ambiguous container type")
+        ($op){P<:Dates.GeneralPeriod, Q<:Dates.GeneralPeriod}(X::StridedArray{P}, Y::CenterIndexedArray{Q}) = error("ambiguous container type")
+    end
+end
+for f in (:&, :|, :$)
+    @eval begin
+        ($f)(A::CenterIndexedArray{Bool}, B::CenterIndexedArray{Bool}) = CenterIndexedArray($f(A.data, B.data))
+        ($f)(A::CenterIndexedArray{Bool}, B::BitArray) = error("ambiguous container type")
+        ($f)(A::BitArray, B::CenterIndexedArray{Bool}) = error("ambiguous container type")
+    end
+end
+(+)(A::AbstractImageDirect, B::CenterIndexedArray) = error("ambiguous container type")
+(-)(A::AbstractImageDirect, B::CenterIndexedArray) = error("ambiguous container type")
+
+# Now we get to the real stuff
+for f in (:.+, :.-, :.*, :./, :.\, :.%, :.<<, :.>>, :div, :mod, :rem, :&, :|, :$)
+   @eval begin
+       ($f){T}(A::Number, B::CenterIndexedArray{T}) = CenterIndexedArray($f(A,B.data))
+       ($f){T}(A::CenterIndexedArray{T}, B::Number) = CenterIndexedArray($f(A.data,B))
+    end
+end
+
 (+)(A::CenterIndexedArray,x::Number) = CenterIndexedArray(A.data + x)
 (+)(x::Number,A::CenterIndexedArray) = CenterIndexedArray(x + A.data)
 (-)(A::CenterIndexedArray,x::Number) = CenterIndexedArray(A.data - x)
 (-)(x::Number,A::CenterIndexedArray) = CenterIndexedArray(x - A.data)
-(.+)(A::CenterIndexedArray{Bool},x::Bool) = CenterIndexedArray(A.data .+ x)
-(.+)(x::Bool,A::CenterIndexedArray{Bool}) = CenterIndexedArray(x .+ A.data)
-(.-)(A::CenterIndexedArray{Bool},x::Bool) = CenterIndexedArray(A.data .- x)
-(.-)(x::Bool,A::CenterIndexedArray{Bool}) = CenterIndexedArray(x .- A.data)
-(.+)(A::CenterIndexedArray,x::Number) = CenterIndexedArray(A.data .+ x)
-(.+)(x::Number,A::CenterIndexedArray) = CenterIndexedArray(x .+ A.data)
-(.-)(A::CenterIndexedArray,x::Number) = CenterIndexedArray(A.data .- x)
-(.-)(x::Number,A::CenterIndexedArray) = CenterIndexedArray(x .- A.data)
 
 (*)(A::CenterIndexedArray,x::Number) = CenterIndexedArray(A.data * x)
 (*)(x::Number,A::CenterIndexedArray) = CenterIndexedArray(x * A.data)
 (/)(A::CenterIndexedArray,x::Number) = CenterIndexedArray(A.data / x)
-(.*){T<:Dates.Period}(A::CenterIndexedArray{T},x::Real) = CenterIndexedArray(A.data .* x)  # ambiguity
-(.*)(A::CenterIndexedArray,x::Number) = CenterIndexedArray(A.data .* x)
-(.*){T<:Dates.Period}(x::Real,A::CenterIndexedArray{T}) = CenterIndexedArray(x .* A.data)  # ambiguity
-(.*)(x::Number,A::CenterIndexedArray) = CenterIndexedArray(x .* A.data)
-(./){T<:Dates.Period}(A::CenterIndexedArray{T},x::Real) = CenterIndexedArray(A.data ./ x)  # ambiguity
-(./)(A::CenterIndexedArray,x::Number) = CenterIndexedArray(A.data ./ x)
-(./)(x::Number,A::CenterIndexedArray) = CenterIndexedArray(x ./ A.data)
+
+for f in (:+, :-, :div, :mod, :&, :|, :$)
+    @eval begin
+        ($f)(A::CenterIndexedArray, B::CenterIndexedArray) = CenterIndexedArray($f(A.data,B.data))
+        ($f){S,T}(A::CenterIndexedArray{S}, B::Range{T}) = CenterIndexedArray($f(A.data,B))
+        ($f){S,T}(B::Range{S}, A::CenterIndexedArray{T}) = CenterIndexedArray($f(B,A.data))
+        ($f)(A::CenterIndexedArray, B::AbstractArray) = error("ambiguous container type")
+        ($f)(B::AbstractArray, A::CenterIndexedArray) = error("ambiguous container type")
+    end
+end
 
 writemime(io::IO, ::MIME"text/plain", X::CenterIndexedArray) =
     Base.with_output_limit(()->begin
@@ -118,4 +151,7 @@ writemime(io::IO, ::MIME"text/plain", X::CenterIndexedArray) =
         Base.showarray(io, X.data, header=false, repr=false)
     end)
 
-end
+show(io::IO, X::CenterIndexedArray) = show(io, X.data)
+showcompact(io::IO, X::CenterIndexedArray) = showcompact(io, X.data)
+
+end  # module
