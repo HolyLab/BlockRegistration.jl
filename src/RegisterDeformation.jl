@@ -2,117 +2,297 @@ __precompile__()
 
 module RegisterDeformation
 
-using Images, AffineTransforms, Interpolations, RegisterUtilities
+using Images, AffineTransforms, Interpolations, FixedSizeArrays, RegisterUtilities
 using Base.Cartesian
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
 
-export WarpedArray, tform2u, translate, uarray2coords, ucoords2array, warp, warp!, warpgrid
+export
+    # types
+    GridDeformation,
+    WarpedArray,
+    # functions
+    tform2deformation,
+    compose,
+    translate,
+    warp,
+    warp!,
+    warpgrid
 
-typealias DimsLike Union(Vector{Int}, Dims)
-typealias InterpExtrap Union(AbstractInterpolation,AbstractExtrapolation)
-typealias Extrapolatable{T,N} Union(TransformedArray{T,N},AbstractExtrapolation{T,N})
+typealias DimsLike Union{Vector{Int}, Dims}
+typealias InterpExtrap Union{AbstractInterpolation,AbstractExtrapolation}
+typealias Extrapolatable{T,N} Union{TransformedArray{T,N},AbstractExtrapolation{T,N}}
 
 """
 # RegisterDeformation
 
-A deformation (or warp) of space is represented by a function `u(x)`,
-where pixel values of an image `img` are "looked up" at a location `x
--> x + u(x)`.  `u(x)` thus expresses the displacement, in pixels, at
-position `x`.  Note that a constant deformation, `u(x) = x0`,
-corresponds to a shift of the *coordinates* by `x0`, and therefore a
-shift of the *image* in the opposite direction.
+A deformation (or warp) of space is represented by a function `ϕ(x)`.
+For an image, the warped version of the image is specified by "looking
+up" the pixel value at a location `ϕ(x) = x + u(x)`.  `u(x)` thus
+expresses the displacement, in pixels, at position `x`.  Note that a
+constant deformation, `u(x) = x0`, corresponds to a shift of the
+*coordinates* by `x0`, and therefore a shift of the *image* in the
+opposite direction.
 
 In reality, deformations will be represented on a grid, and
-interpolation is implied at locations between grid points. Given an
-image of size `imsize`, the "control points" of the grid are assumed
-to be equally spaced, with the first and last at the corners of the
-image.
-
-There are two main representations of `u`:
-
-- Packed single-array representation: `u[dim, i, j]` is the
-  displacement along coordinate `dim` for grid point `i,j`. `u[:,i,j]`
-  is the vector of displacements.
-- Multi-coordinate representation: the deformation is expressed as a
-  collection of arrays, `u1, ..., ud` in `d` dimensions. `u1[i,j]` is
-  the displacement along coordinate 1 for grid point `i,j`.
-
-For image registration, deformations are closely coupled to the
-mismatch.  `u[:,i,j,...]` corresponds to a particular location in the
-`i,j,...` block of the `nums`, `denoms` arrays. For example, when
-`u[:,i,j,...] = 0`, it corresponds to the element in the center; when
-`u` has fractional values, the mismatch will be interpolated. A key
-constraint is that, for the mismatch to be well-defined at a
-particular `u`, we require `|u| <= maxshift-0.5`, where the 0.5 arises
-from the need to perform quadratic interpolation. When `u` does not
-satisfy this condition, you may trigger an error indicating that the
-mismatch does not have a finite value.
+interpolation is implied at locations between grid points.
 
 The major functions/types exported by RegisterDeformation are:
 
+    - `GridDeformation`: create a deformation
+    - `tform2deformation`: convert an `AffineTransform` to a deformation
+    - `ϕ_old(ϕ_new)` and `compose`: composition of two deformations
     - `warp` and `warp!`: deform an image
     - `WarpedArray`: create a deformed array lazily
     - `warpgrid`: visualize a deformation
-    - `tform2u`: convert an `AffineTransform` to a deformation
-    - `uarray2coords` and `ucoords2array`: convert between the two represenations of `u`
 
-See also: `compose_u` for composition of two deformations.
 """
 RegisterDeformation
 
+abstract AbstractDeformation{T,N}
+
+"""
+`ϕ = GridDeformation(u::Array{FixedVector}, dims)` creates a
+deformation `ϕ` for an array of size `dims`.  `u` specifies the
+"pixel-wise" displacement at a series of control points that are
+evenly-spaced over the domain specified by `dims` (i.e., using
+knot-vectors `linspace(1,dims[d],size(u,d))`).  In particular, each
+corner of the array is the site of one control point.
+
+`ϕ = GridDeformation(u::Array{FixedVector}, knots)` specifies the
+knot-vectors manually. `u` must have dimensions equal to
+`(length(knots[1]), length(knots[2]), ...)`.
+
+`ϕ = GridDeformation(u::Array{T<:Real}, ...)` constructs the
+deformation from a "plain" array. For a deformation in `N` dimensions,
+`u` must have `N+1` dimensions, where the first dimension corresponds
+to the displacement along each axis (and therefore `size(u,1) == N`).
+
+Finally, `ϕ = GridDeformation((u1, u2, ...), ...)` allows you to
+construct the deformation using an `N`-tuple of shift-arrays, each
+with `N` dimensions.
+"""
+immutable GridDeformation{T,N,A<:AbstractArray,L} <: AbstractDeformation{T,N}
+    u::A
+    knots::NTuple{N,L}
+
+    function GridDeformation{FV<:FixedVector}(u::AbstractArray{FV,N},
+                                              knots::NTuple{N,L})
+        length(FV) == N || throw(DimensionMismatch("Dimensionality $(length(FV)) must match $N knot vectors"))
+        for d = 1:N
+            size(u, d) == length(knots[d]) || error("size(u) = $(size(u)), but the knots specify a grid of size $(map(length, knots))")
+        end
+        new(u, knots)
+    end
+    function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV,N})
+        new(u, u.ranges)
+    end
+end
+
+# Ambiguity avoidance
+function GridDeformation{FV<:FixedVector,N}(u::AbstractArray{FV,N},
+                                            knots::Tuple{})
+    error("Cannot supply an empty knot tuple")
+end
+
+# With knot ranges
+function GridDeformation{FV<:FixedVector,N,L<:Range}(u::AbstractArray{FV,N},
+                                                     knots::NTuple{N,L})
+    T = eltype(FV)
+    length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires Vec{$N,T}"))
+    GridDeformation{T,N,typeof(u),L}(u, knots)
+end
+
+# With image spatial size
+function GridDeformation{FV<:FixedVector,N,L<:Integer}(u::AbstractArray{FV,N},
+                                                       dims::NTuple{N,L})
+    T = eltype(FV)
+    length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires Vec{$N,T}"))
+    knots = ntuple(d->linspace(1,dims[d],size(u,d)), N)
+    GridDeformation{T,N,typeof(u),typeof(knots[1])}(u, knots)
+end
+
+# Construct from a plain array
+function GridDeformation{T<:Number,N}(u::Array{T}, knots::NTuple{N})
+    ndims(u) == N+1 || error("Need $(N+1) dimensions for $N-dimensional deformations")
+    size(u,1) == N || error("First dimension of u must be of length $N")
+    uf = convert_to_fixed(u)
+    GridDeformation(uf, knots)
+end
+
+# Construct from a (u1, u2, ...) tuple
+function GridDeformation{N}(u::NTuple{N}, knots::NTuple{N})
+    ndims(u[1]) == N || error("Need $N dimensions for $N-dimensional deformations")
+    ua = permutedims(cat(N+1, u...), (N+1,(1:N)...))
+    uf = convert_to_fixed(ua)
+    GridDeformation(uf, knots)
+end
+
+function convert_to_fixed{T}(u::Array{T})
+    N = size(u,1)
+    if isbits(T)
+        uf = reinterpret(Vec{N,T}, u, Base.tail(size(u)))
+    else
+        uf = Array(Vec{N,T}, Base.tail(size(u)))
+        for i = 1:length(uf)
+            uf[i] = Vec(u[:,i]...)
+        end
+    end
+    uf
+end
+
+function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV})
+    N = length(FV)
+    ndims(u) == N || throw(DimensionMismatch("Dimension $(ndims(u)) incompatible with vectors of length $N"))
+    GridDeformation{eltype(FV),N,typeof(u),typeof(u.ranges[1])}(u)
+end
+
+# # TODO: flesh this out
+# immutable VoroiDeformation{T,N,Vu<:AbstractVector,Vc<:AbstractVector} <: AbstractDeformation{T,N}
+#     u::Vu
+#     centers::Vc
+#     simplexes::??
+# end
+# (but there are several challenges, including the lack of a continuous gradient)
+
+function Interpolations.interpolate{BC}(ϕ::GridDeformation, ::Type{BC})
+    itp = scale(interpolate(ϕ.u, BSpline{Quadratic{BC}}, OnCell), ϕ.knots...)
+    GridDeformation(itp)
+end
+Interpolations.interpolate(ϕ::GridDeformation) = interpolate(ϕ, Flat)
+
+function Interpolations.interpolate!{BC}(ϕ::GridDeformation, ::Type{BC})
+    itp = scale(interpolate!(ϕ.u, BSpline{Quadratic{BC}}, OnCell), ϕ.knots...)
+    GridDeformation(itp)
+end
+Interpolations.interpolate!(ϕ::GridDeformation) = interpolate!(ϕ, InPlace)
+
+Interpolations.interpolate{ T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}) = error("ϕ is already interpolating")
+
+Interpolations.interpolate!{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}) = error("ϕ is already interpolating")
+
+@generated function Base.getindex{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}, xs::Number...)
+    length(xs) == N || throw(DimensionMismatch("$(length(xs)) indexes is not consistent with ϕ dimensionality $N"))
+    xindexes = [:(xs[$d]) for d = 1:N]
+    ϕxindexes = [:(xs[$d]+ux[$d]) for d = 1:N]
+    quote
+        ux = ϕ.u[$(xindexes...)]
+        Vec($(ϕxindexes...))
+    end
+end
+
+# Composition ϕ_old(ϕ_new(x))
+function Base.call{T1,T2,N,
+                   A1<:AbstractInterpolation,
+                   A2<:AbstractInterpolation}(
+        ϕ_old::GridDeformation{T1,N,A1}, ϕ_new::GridDeformation{T2,N,A2})
+    u, knots = ϕ_old.u, ϕ_old.knots
+    sz = map(length, knots)
+    x = Array(Float64, N)
+    Tdest = _compose_type(u, knots, ϕ_new)
+    ucomp = similar(u, Tdest)
+    for I in CartesianRange(sz)
+        for d = 1:N
+            x[d] = knots[d][I[d]]
+        end
+        y = ϕ_new[x...]
+        dx = y-Vec(x...)
+        ucomp[I] = dx + u[y...]
+    end
+    GridDeformation(ucomp, knots)
+end
+
+function _compose_type(u, knots, ϕ_new)
+    N = ndims(u)
+    x = Array(Float64, N)
+    for d = 1:N
+        x[d] = knots[d][1]
+    end
+    y = ϕ_new[x...]
+    dx = y-Vec(x...)
+    typeof(dx + u[y...])
+end
+
+"""
+`ϕ_c = ϕ_old(ϕ_new)` computes the composition of two deformations,
+yielding a deformation for which `ϕ_c(x) ≈ ϕ_old(ϕ_new(x))`.
+
+`ϕ_c, g = compose(ϕ_old, ϕ_new)` also yields the gradient `g` of `ϕ_c`
+with respect to `u_new`.  `g[:,i,j,...]` encodes the value of the
+gradient at grid position `(i,j,...)`.
+
+You can use `_, g = compose(identity, ϕ_new)` if you need the gradient
+for when `ϕ_old` is equal to the identity transformation.
+"""
+function compose{T1,T2,N,
+                 A1<:AbstractInterpolation,
+                 A2<:AbstractInterpolation}(
+        ϕ_old::GridDeformation{T1,N,A1}, ϕ_new::GridDeformation{T2,N,A2})
+    u, knots = ϕ_old.u, ϕ_old.knots
+    sz = map(length, knots)
+    x = Array(Float64, N)
+    ucomp = similar(u)
+    g = similar(u, (N, size(u)...))
+    gtmp = Array(eltype(u), N)
+    eye = [Vec([i==d ? 1 : 0 for i = 1:N]...) for d = 1:N]
+    for I in CartesianRange(sz)
+        for d = 1:N
+            x[d] = knots[d][I[d]]
+        end
+        y = ϕ_new[x...]
+        dx = y-Vec(x...)
+        ucomp[I] = dx + u[y...]
+        gradient!(gtmp, u, y...)
+        for d = 1:N
+            g[d, I] = gtmp[d] + eye[d]
+        end
+    end
+    GridDeformation(ucomp, knots), g
+end
+
+function compose{T,N}(f::Function, ϕ_new::GridDeformation{T,N})
+    f == identity || error("Only the identity function is supported")
+    eye = [Vec{N,T}([i==d ? 1 : 0 for i = 1:N]...) for d = 1:N]
+    ϕ_new, reshape(repeat(eye, outer=[length(ϕ_new.u)]), (N, size(ϕ_new.u)...))
+end
+
+
 ### WarpedArray
 """
-A `WarpedArray` `W` is an AbstractArray for which `W[x,y,...] = A[g_x(x,y,...), g_y(x,y,...), ...]` for some parent array `A` and some deformation `(g_x, g_y, ...)`.  The object is created lazily, meaning that computation of the displaced values occurs only when you ask for them explicitly.
+A `WarpedArray` `W` is an AbstractArray for which `W[x] = A[ϕ(x)]` for
+some parent array `A` and some deformation `ϕ`.  The object is created
+lazily, meaning that computation of the displaced values occurs only
+when you ask for them explicitly.
 
 Create a `WarpedArray` like this:
 
 ```
-W = WarpedArray(A, (u_x, u_y, ...))
+W = WarpedArray(A, ϕ)
 ```
 where
 
 - The first argument `A` is an `AbstractExtrapolation` that can be
   evaluated anywhere.  See the Interpolations package.
-- The second argument, `(u_x,u_y,...)`, specifies the deformation. It
-  must be encoded as a difference from the identity deformation (i.e.,
-  no deformation), `g_x(x,y,...) = x + u_x(x,y,...)`.  `u_i` expresses
-  the number of pixels of shift along dimension `i` at the evaluation
-  location.  Each `u_i` is supplied either as an
-  `AbstractInterpolation` or as an N-dimensional array which is
-  assumed to span "corner-to-corner" the whole array `A`. In the
-  latter case, the `u_i` will use quadratic interpolation.
-
+- ϕ is an `AbstractDeformation`
 """
-type WarpedArray{T,N,U<:InterpExtrap,A<:Extrapolatable} <: AbstractArray{T,N}
+type WarpedArray{T,N,A<:Extrapolatable,D<:AbstractDeformation} <: AbstractArray{T,N}
     data::A
-    u::NTuple{N,U}
+    ϕ::D
 end
 
-# Ambiguity resolution
-function WarpedArray{T,N}(p::Extrapolatable{T,N}, u::Tuple{})
-    if N == 0
-        # kinda dumb
-        return WarpedArray{T,N,Interpolations.BSplineInterpolation{Float64,0,Float64,BSpline{Linear},OnGrid,0},typeof(p)}(p, u)
-    end
-    error("Dimensionality $N does not match 0-dimensional u")
+# User already supplied an interpolatable ϕ
+function WarpedArray{T,N,S,A<:AbstractInterpolation}(data::Extrapolatable{T,N},
+                                                     ϕ::GridDeformation{S,N,A})
+    WarpedArray{T,N,typeof(data),typeof(ϕ)}(data, ϕ)
 end
 
-WarpedArray{T,N,U<:InterpExtrap}(p::Extrapolatable{T,N}, u::NTuple{N,U}) =
-    WarpedArray{T,N,U,typeof(p)}(p, u)
-
-function WarpedArray{T,N,UT<:AbstractFloat}(p::Extrapolatable{T,N}, u::NTuple{N,Array{UT,N}})
-    uq = map(A->interpolate(A, BSpline{Quadratic{Flat}}, OnCell), u)
-    WarpedArray{T,N,typeof(uq[1]),typeof(p)}(p, uq)
+# Create an interpolatable ϕ
+function WarpedArray{T,N}(data::Extrapolatable{T,N}, ϕ::GridDeformation)
+    itp = scale(interpolate(ϕ.u, BSpline{Quadratic{Flat}}, OnCell), ϕ.knots...)
+    ϕ′ = GridDeformation(itp, ϕ.knots)
+    WarpedArray{T,N,typeof(data),typeof(ϕ′)}(data, ϕ′)
 end
 
-#WarpedArray{N,U<:InterpExtrap}(p, u::NTuple{N,U}) = WarpedArray(to_etp(p), u)
-
-function WarpedArray(p::Extrapolatable, u::AbstractArray)
-    ucoords = uarray2coords(u)
-    WarpedArray(p, ucoords)
-end
-
-WarpedArray(p, u) = WarpedArray(to_etp(p), u)
+WarpedArray(data, ϕ::GridDeformation) = WarpedArray(to_etp(data), ϕ)
 
 
 Base.size(A::WarpedArray) = size(A.data)
@@ -126,11 +306,14 @@ Base.eltype{T}(A::WarpedArray{T}) = T
 end
 
 function getindex_impl(N)
-    y_syms      = [:($(symbol("y_",d))) for d = 1:N]
-    y_conv      = [:(n = size(W.data,$d); m = length(W.u[$d]); $(y_syms[d]) = ((m-1)*x[$d] - m + n)/(n-1)) for d = 1:N]
-    index_exprs = [:(x[$d] + W.u[$d][$(y_syms...)]) for d = 1:N]
+    indxx = [:(x[$d]) for d = 1:N]
+    indxϕx = [:(ϕx[$d]) for d = 1:N]
     meta = Expr(:meta, :inline)
-    :($meta; $(y_conv...); W.data[$(index_exprs...)])
+    quote
+        $meta
+        ϕx = W.ϕ[$(indxx...)]
+        W.data[$(indxϕx...)]
+    end
 end
 
 getindex!(dest, W::WarpedArray, coords...) = Base._unsafe_getindex!(dest, Base.LinearSlow(), W, coords...)
@@ -153,15 +336,15 @@ function translate(A::AbstractArray, displacement::DimsLike)
 end
 
 """
-`u = tform2u(tform, arraysize, gridsize)` constructs a deformation
-grid `u` from the affine transform `tform` suitable for warping arrays
+`ϕ = tform2deformation(tform, arraysize, gridsize)` constructs a deformation
+`ϕ` from the affine transform `tform` suitable for warping arrays
 of size `arraysize`.  The origin-of-coordinates for `tform` is the
 center of the array, meaning that if `tform` is a pure rotation the
-array "spins" around its center.  The array of grid points in `u` has
+array "spins" around its center.  The array of grid points defining `ϕ` has
 size specified by `gridsize`.  The dimensionality of `tform` must
 match that specified by `arraysize` and `gridsize`.
 """
-function tform2u{T,N}(tform::AffineTransform{T,N}, arraysize, gridsize)
+function tform2deformation{T,N}(tform::AffineTransform{T,N}, arraysize, gridsize)
     if length(arraysize) != N || length(gridsize) != N
         error("Dimensionality mismatch")
     end
@@ -176,50 +359,17 @@ function tform2u{T,N}(tform::AffineTransform{T,N}, arraysize, gridsize)
         x = (c.-1).*s - center
         u[:,k+=1] = A*x+tform.offset
     end
-    return reshape(u, N, gridsize...)
+    urs = reshape(u, N, gridsize...)
+    knots = ntuple(d->linspace(1,arraysize[d],gridsize[d]), N)
+    GridDeformation(urs, knots)
 end
 
 """
-`(u1,u2...) = uarray2coords(u)` converts the array representation of
-`u` (of size `(ndims, sz...)`) into a `ndims` tuple of arrays of size
-`sz`.
+`wimg = warp(img, ϕ)` warps the array `img` according to the
+deformation `ϕ`.
 """
-function uarray2coords(u)
-    nd = size(u,1)
-    if size(u, nd+2) > 1
-        error("This is not a single image pair, it's a sequence")
-    end
-    rng = ntuple(i->1:size(u,i+1), size(u,1))
-    ucoords = ntuple(i->squeeze(u[i,rng...], 1), size(u,1))
-end
-
-"""
-`u = ucoords2array((u1,u2...))` converts the tuple-representation of
-of a deformation into an array `u` of size `(ndims, sz...)`.
-"""
-function ucoords2array(ucoords::Tuple)
-    nd = length(ucoords)
-    gridsize = size(ucoords[1])
-    rng = ntuple(i->1:gridsize[i], nd)
-    uarray = Array(eltype(ucoords[1]), nd, gridsize...)
-    for i = 1:prod(gridsize), idim = 1:nd
-        uarray[idim, i] = ucoords[idim][i]
-    end
-    uarray
-end
-
-"""
-`wimg = warp(img, u)` warps the array `img` according to the
-deformation `u`, represented as an array.
-
-`wimg = warp(img, ucoords...)` parametrizes the deformation as a
-tuple-of-arrays.
-"""
-function warp(img, ucoords...)
-    if length(ucoords) == 1 && ndims(ucoords[1]) == ndims(img)+1
-        ucoords = ucoords[1]
-    end
-    wimg = WarpedArray(img, ucoords)
+function warp(img, ϕ)
+    wimg = WarpedArray(img, ϕ)
     dest = similar(img)
     warp!(dest, wimg)
 end
@@ -236,54 +386,39 @@ end
 
 
 """
-`warp!(dest, img, ucoords...)` warps `img` using the deformation `ucoords`.  The result is stored in `dest`.
+`warp!(dest, img, ϕ)` warps `img` using the deformation `ϕ`.  The result is stored in `dest`.
 """
-function warp!(dest::AbstractArray, img::AbstractArray, ucoords...)
-    wimg = WarpedArray(to_etp(img), ucoords)
+function warp!(dest::AbstractArray, img::AbstractArray, ϕ)
+    wimg = WarpedArray(to_etp(img), ϕ)
     warp!(dest, wimg)
 end
 
 """
-`warp!(dest, img, tform, ucoords...)` warps `img` using a combination of the affine transformation `tform` followed by deformation with `ucoords`.  The result is stored in `dest`.
+`warp!(dest, img, tform, ϕ)` warps `img` using a combination of the affine transformation `tform` followed by deformation with `ϕ`.  The result is stored in `dest`.
 """
-function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ucoords...)
-    wimg = WarpedArray(to_etp(img, A), ucoords)
+function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ϕ)
+    wimg = WarpedArray(to_etp(img, A), ϕ)
     warp!(dest, wimg)
 end
 
 """
-`img = warpgrid(u, imsize; [normalized=false])` returns an image `img`
-that permits visualization of the deformation `u` (which must be in
-array representation).  The output is a warped rectangular grid with
-nodes centered on the control points as specified by the size of `u`
-(specifying the `gridsize`) and `imsize` (specifying the size of the
-fixed/moving images and `img`).
-
-If `normalize==true`, the values in `u` are interpreted as a fraction
-of the distance to the adjacent control point (i.e, scaled by the
-block size).
+`img = warpgrid(ϕ)` returns an image `img` that permits visualization
+of the deformation `ϕ`.  The output is a warped rectangular grid with
+nodes centered on the control points as specified by the knots of `ϕ`.
 """
-function warpgrid(u::AbstractArray, imsz; normalized::Bool=false)
-    length(imsz) == size(u,1) || throw(DimensionMismatch("u is for $(size(u,1)) dimensions, but the image has $(length(imsz)) dimensions"))
+function warpgrid(ϕ)
+    imsz = map(x->convert(Int, last(x)), ϕ.knots)
     img = zeros(eltype(u), imsz)
     imsza = Any[imsz...]
     for idim = 1:ndims(img)
-        x = round(Int, linspace(1, imsz[idim], size(u, idim+1)))
         indexes = map(s -> 1:s, imsza)
-        indexes[idim] = x
+        indexes[idim] = round(Int, ϕ.knots[idim])
         img[indexes...] = 1
     end
-    if normalized
-        blocksize = zeros(ndims(img))
-        for idim = 1:ndims(img)
-            gsz = size(u,idim+1)
-            blocksize[idim] = imsz[idim]/(gsz > 1 ? gsz-1 : gsz)
-        end
-        u = u .* blocksize
-    end
-    warp(img, u)
+    warp(img, ϕ)
 end
 
+# TODO?: do we need to return real values beyond-the-edge for a SubArray?
 to_etp(img) = extrapolate(interpolate(data(img), BSpline{Linear}, OnGrid), convert(promote_type(eltype(img), Float32), NaN))
 
 to_etp(itp::AbstractInterpolation) = extrapolate(itp, convert(promote_type(eltype(itp), Float32), NaN))
