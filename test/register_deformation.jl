@@ -118,7 +118,7 @@ psub = sub(collect(p), 3:20)
 q = RegisterDeformation.WarpedArray(psub, ϕ);
 RegisterDeformation.getindex!(dest, q, -1:8)
 @assert maximum(abs(dest - p[1:10])) < 10*eps(maximum(abs(dest)))
-any(isnan, dest) && warn("Some dest are NaN, not sure yet whether this is a problem")
+any(isnan, dest) && warn("Some dest are NaN, not yet sure whether this is a problem")
 
 # Stretches
 u = [0.0,5.0,10.0]
@@ -182,11 +182,9 @@ j = ForwardDiff.jacobian(u2vec -> compose_u(u1, u2vec, size(u1), imsz))
 gj = j(u2vec)
 function compare_g(g, gj, gridsize)
     for j = 1:gridsize[2], i = 1:gridsize[1]
-        gv = g[:,i,j]
-        gm = reinterpret(Float64, gv, (2,2))
         indx = sub2ind(gridsize, i, j)
         rng = 2*(indx-1)+1:2indx
-        @test_approx_eq gm gj[rng, rng]
+        @test_approx_eq g[i,j] gj[rng, rng]
         for k = 1:2*prod(gridsize)
             if !in(k, rng)
                 @assert abs(gj[k,rng[1]]) < 1e-15

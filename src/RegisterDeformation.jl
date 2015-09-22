@@ -34,7 +34,9 @@ constant deformation, `u(x) = x0`, corresponds to a shift of the
 opposite direction.
 
 In reality, deformations will be represented on a grid, and
-interpolation is implied at locations between grid points.
+interpolation is implied at locations between grid points. For a
+deformation defined directly from an array, make it interpolating
+using `ϕi = interpolate(ϕ)`.
 
 The major functions/types exported by RegisterDeformation are:
 
@@ -95,8 +97,8 @@ function GridDeformation{FV<:FixedVector,N}(u::AbstractArray{FV,N},
 end
 
 # With knot ranges
-function GridDeformation{FV<:FixedVector,N,L<:Range}(u::AbstractArray{FV,N},
-                                                     knots::NTuple{N,L})
+function GridDeformation{FV<:FixedVector,N,L<:AbstractVector}(u::AbstractArray{FV,N},
+                                                              knots::NTuple{N,L})
     T = eltype(FV)
     length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires Vec{$N,T}"))
     GridDeformation{T,N,typeof(u),L}(u, knots)
@@ -170,6 +172,10 @@ Interpolations.interpolate{ T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,
 
 Interpolations.interpolate!{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}) = error("ϕ is already interpolating")
 
+function Base.getindex{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}, x::FixedVector{N})
+    x + ϕ.u[x]
+end
+
 @generated function Base.getindex{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}, xs::Number...)
     length(xs) == N || throw(DimensionMismatch("$(length(xs)) indexes is not consistent with ϕ dimensionality $N"))
     xindexes = [:(xs[$d]) for d = 1:N]
@@ -181,80 +187,71 @@ Interpolations.interpolate!{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,
 end
 
 # Composition ϕ_old(ϕ_new(x))
-function Base.call{T1,T2,N,
-                   A1<:AbstractInterpolation,
-                   A2<:AbstractInterpolation}(
-        ϕ_old::GridDeformation{T1,N,A1}, ϕ_new::GridDeformation{T2,N,A2})
+function Base.call{T,N,A<:AbstractInterpolation}(
+        ϕ_old::GridDeformation{T,N,A}, ϕ_new::GridDeformation)
     u, knots = ϕ_old.u, ϕ_old.knots
     sz = map(length, knots)
-    x = Array(Float64, N)
-    Tdest = _compose_type(u, knots, ϕ_new)
-    ucomp = similar(u, Tdest)
+    x = knot(knots, 1)
+    out = _compose(u, ϕ_new, x)
+    ucomp = similar(u, typeof(out))
     for I in CartesianRange(sz)
-        for d = 1:N
-            x[d] = knots[d][I[d]]
-        end
-        y = ϕ_new[x...]
-        dx = y-Vec(x...)
-        ucomp[I] = dx + u[y...]
+        ucomp[I] = _compose(u, ϕ_new, knot(knots, I))
     end
     GridDeformation(ucomp, knots)
 end
 
-function _compose_type(u, knots, ϕ_new)
-    N = ndims(u)
-    x = Array(Float64, N)
-    for d = 1:N
-        x[d] = knots[d][1]
-    end
-    y = ϕ_new[x...]
-    dx = y-Vec(x...)
-    typeof(dx + u[y...])
+function _compose(u, ϕ_new, x)
+    dx = ϕ_new.u[x]
+    dx + u[x+dx]
 end
+
+@generated function knot{N}(knots::NTuple{N}, i::Integer)
+    args = [:(knots[$d][i]) for d = 1:N]
+    :(Vec($(args...)))
+end
+
+@generated function knot{N}(knots::NTuple{N}, I)
+    args = [:(knots[$d][I[$d]]) for d = 1:N]
+    :(Vec($(args...)))
+end
+
 
 """
 `ϕ_c = ϕ_old(ϕ_new)` computes the composition of two deformations,
 yielding a deformation for which `ϕ_c(x) ≈ ϕ_old(ϕ_new(x))`.
 
 `ϕ_c, g = compose(ϕ_old, ϕ_new)` also yields the gradient `g` of `ϕ_c`
-with respect to `u_new`.  `g[:,i,j,...]` encodes the value of the
-gradient at grid position `(i,j,...)`.
+with respect to `u_new`.  `g[i,j,...]` is the Jacobian matrix at grid
+position `(i,j,...)`.
 
 You can use `_, g = compose(identity, ϕ_new)` if you need the gradient
 for when `ϕ_old` is equal to the identity transformation.
 """
-function compose{T1,T2,N,
-                 A1<:AbstractInterpolation,
-                 A2<:AbstractInterpolation}(
-        ϕ_old::GridDeformation{T1,N,A1}, ϕ_new::GridDeformation{T2,N,A2})
+function compose{T,N,A<:AbstractInterpolation}(
+        ϕ_old::GridDeformation{T,N,A}, ϕ_new::GridDeformation)
     u, knots = ϕ_old.u, ϕ_old.knots
     sz = map(length, knots)
-    x = Array(Float64, N)
-    ucomp = similar(u)
-    g = similar(u, (N, size(u)...))
-    gtmp = Array(eltype(u), N)
-    eye = [Vec([i==d ? 1 : 0 for i = 1:N]...) for d = 1:N]
+    x = knot(knots, 1)
+    out = _compose(u, ϕ_new, x)
+    ucomp = similar(u, typeof(out))
+    TG = Mat{N,N,eltype(out)}
+    g = Array(TG, size(u))
+    gtmp = Array(typeof(out), N)
+    eyeN = eye(TG)
     for I in CartesianRange(sz)
-        for d = 1:N
-            x[d] = knots[d][I[d]]
-        end
-        y = ϕ_new[x...]
-        dx = y-Vec(x...)
-        ucomp[I] = dx + u[y...]
-        gradient!(gtmp, u, y...)
-        for d = 1:N
-            g[d, I] = gtmp[d] + eye[d]
-        end
+        x = knot(knots, I)
+        y = ϕ_new[x]
+        ucomp[I] = y - x + u[y]
+        gradient!(gtmp, u, y)
+        g[I] = convert(TG, gtmp) + eyeN
     end
     GridDeformation(ucomp, knots), g
 end
 
 function compose{T,N}(f::Function, ϕ_new::GridDeformation{T,N})
     f == identity || error("Only the identity function is supported")
-    eye = [Vec{N,T}([i==d ? 1 : 0 for i = 1:N]...) for d = 1:N]
-    ϕ_new, reshape(repeat(eye, outer=[length(ϕ_new.u)]), (N, size(ϕ_new.u)...))
+    ϕ_new, fill(eye(Mat{N,N,T}), size(ϕ_new.u))
 end
-
 
 ### WarpedArray
 """
@@ -427,4 +424,29 @@ to_etp(etp::AbstractExtrapolation) = etp
 
 to_etp(img, A::AffineTransform) = TransformedArray(to_etp(img), A)
 
+# Extensions to Interpolations and FixedSizedArrays
+@generated function Base.getindex{T,N}(itp::ScaledInterpolation{T,N}, x::FixedVector{N})
+    args = [:(x[$d]) for d = 1:N]
+    meta = Expr(:meta, :inline)
+    quote
+        $meta
+        getindex(itp, $(args...))
+    end
 end
+
+@generated function Interpolations.gradient!{T,N}(g, itp::ScaledInterpolation{T,N}, x::FixedVector{N})
+    args = [:(x[$d]) for d = 1:N]
+    meta = Expr(:meta, :inline)
+    quote
+        $meta
+        gradient!(g, itp, $(args...))
+    end
+end
+
+# Note this is a bit unsafe as it requires the user to specify C correctly
+@generated function Base.convert{R,C,T}(::Type{Mat{R,C,T}}, v::Vector{Vec{R,T}})
+    args = [:(v[$d]._) for d = 1:C]
+    :(Mat{R,C,T}(($(args...))))
+end
+
+end  # module
