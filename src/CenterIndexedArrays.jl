@@ -52,14 +52,14 @@ end
     :($meta; CartesianRange(CartesianIndex{$N}($(startargs...)), CartesianIndex{$N}($(stopargs...))))
 end
 
-@generated function getindex{T,N}(A::CenterIndexedArray{T,N}, i::Integer...)
+@generated function getindex{T,N}(A::CenterIndexedArray{T,N}, i::Number...)
     length(i) == N || error("Must use $N indexes")
     args = [:(i[$d]+A.halfsize[$d]+1) for  d = 1:N]
     meta = Expr(:meta, :inline)
     :($meta; A.data[$(args...)])
 end
 
-@generated function setindex!{T,N}(A::CenterIndexedArray{T,N}, v, i::Integer...)
+@generated function setindex!{T,N}(A::CenterIndexedArray{T,N}, v, i::Number...)
     length(i) == N || error("Must use $N indexes")
     args = [:(i[$d]+A.halfsize[$d]+1) for  d = 1:N]
     meta = Expr(:meta, :inline)
