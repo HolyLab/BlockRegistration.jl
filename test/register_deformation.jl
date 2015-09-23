@@ -2,6 +2,15 @@ import RegisterDeformation
 using AffineTransforms, Interpolations, ForwardDiff
 using Base.Test
 
+knots = (linspace(1,15,5), linspace(1,11,3))
+@test RegisterDeformation.arraysize(knots) == (15,11)
+
+knotsall = (knots[1].*ones(length(knots[2]))', ones(length(knots[1])).*knots[2]')
+for (i, knt) in enumerate(RegisterDeformation.eachknot(knots))
+    @test knt[1] == knotsall[1][i]
+    @test knt[2] == knotsall[2][i]
+end
+
 randrange(xmin, xmax) = (xmax-xmin)*rand() + xmin
 
 ## Deformations

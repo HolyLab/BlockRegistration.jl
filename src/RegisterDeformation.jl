@@ -12,14 +12,16 @@ export
     GridDeformation,
     WarpedArray,
     # functions
-    tform2deformation,
+    arraysize,
+    eachknot,
     compose,
+    tform2deformation,
     translate,
+    vecindex,
+    vecgradient!,
     warp,
     warp!,
-    warpgrid,
-    vecindex,
-    vecgradient!
+    warpgrid
 
 typealias DimsLike Union{Vector{Int}, Dims}
 typealias InterpExtrap Union{AbstractInterpolation,AbstractExtrapolation}
@@ -217,8 +219,11 @@ lookup(u::AbstractInterpolation, x, i) = vecindex(u, x)
 lookup(u, x, i) = u[i]
 
 @generated function knot{N}(knots::NTuple{N}, i::Integer)
-    args = [:(knots[$d][i]) for d = 1:N]
-    :(Vec($(args...)))
+    args = [:(knots[$d][s[$d]]) for d = 1:N]
+    quote
+        s = ind2sub(map(length, knots), i)
+        Vec($(args...))
+    end
 end
 
 @generated function knot{N}(knots::NTuple{N}, I)
@@ -226,6 +231,22 @@ end
     :(Vec($(args...)))
 end
 
+arraysize(knots::NTuple) = map(k->(x = extrema(k); convert(Int, x[2]-x[1]+1)), knots)
+
+immutable KnotIterator{K,N}
+    knots::K
+    iter::CartesianRange{N}
+end
+
+eachknot(knots) = KnotIterator(knots, CartesianRange(map(length, knots)))
+
+Base.start(ki::KnotIterator) = start(ki.iter)
+Base.done(ki::KnotIterator, state) = done(ki.iter, state)
+function Base.next(ki::KnotIterator, state)
+    I, state = next(ki.iter, state)
+    k = knot(ki.knots, I)
+    k, state
+end
 
 """
 `ϕ_c = ϕ_old(ϕ_new)` computes the composition of two deformations,
