@@ -2,18 +2,16 @@
 
 module RegisterFit
 
-using Optim, NLsolve, RegisterPenalty, RegisterCore, AffineTransforms, Grid, Interpolations, Optim1d
+using Optim, NLsolve, RegisterPenalty, RegisterCore, AffineTransforms, Interpolations, Optim1d, FixedSizeArrays
 import Optim: optimize, nelder_mead
 
 import Base: @nloops, @nexprs, @nref
 
 export
     mismatch2affine,
-    optim1d,
     optimize,
-    optimize_per_block,
+    optimize_per_aperture,
     optimize_rigid,
-    pat_affine,
     pat_rotation,
     principalaxes,
     qbuild,
@@ -21,38 +19,73 @@ export
     uisvalid,
     uclamp!
 
+"""
+# RegisterFit
+
+This module contains a number of functions that calculate affine
+transformations that minimize mismatch.  The functions are organized
+into categories:
+
+### Global optimization
+
+- `mismatch2affine`: a transformation computed from mismatch data by least squares
+- `pat_rotation`: find the optimal rigid transform via a Principal Axes Transformation
+- `optimize_per_aperture`: naive registration using independent apertures
+
+### Local optimization
+
+- `optimize_rigid`: iterative improve a rigid transformation given raw images
+- `optimize`: iteratively improve an affine transform given mismatch data
+
+### Utilities
+
+- `qfit`: fit a single aperture's mismatch data to a quadratic form
+- `qbuild`: reconstruct mismatch data from a quadratic form
+- `uclamp!` and `uisvalid!`: check/enforce bounds on optimization
+
+"""
+
 # For bounds constraints
 const register_half = 0.5001
 const register_half_safe = 0.51
 
-function mismatch2affine(nums, denoms, thresh, arraysize)
-    gsize = gridsize(nums)
-    d = length(gsize)
-    B = first(nums)
-    T = eltype(B)
+"""
+`tform = mismatch2affine(mms, thresh, knots)` returns an affine
+transformation that is a "best initial guess" for the transformation
+that would minimize the mismatch.  The mismatch is encoded in `mms`
+(of the format returned by RegisterMismatch), and `thresh` is the
+denominator-threshold that determines regions that have sufficient
+pixel/intensity overlap to be considered valid.  `knots` represents
+the aperture centers (see RegisterDeformation).
+
+The algorithm is based on fitting each aperture to a quadratic, and
+then performing a least-squares minimization of the
+sum-over-apertures.  The strength of this procedure is that it finds a
+global solution; however, it is based on a coarse approximation, the
+quadratic fit.  If you want to polish `tform` without relying on the
+quadratic fit, see `optimize`.
+"""
+function mismatch2affine(mms, thresh, knots)
+    gridsize = size(mms)
+    N = length(gridsize)
+    mm = first(mms)
+    T = eltype(eltype(mm))
     TFT = typeof(one(T)/2)  # transformtype; it needs to be a floating-point type
-    n = prod(gsize)
-    u0 = cell(n)
-    Q = cell(n)
-#     denom = zeros(T, size(B))
-#     for c in Counter(gsize)
-#         den = getblock(denoms, c...)
-#         for j = 1:length(denom)
-#             denom[j] += den[j]
-#         end
-#     end
+    n = prod(gridsize)
+    # Fit the parameters of each quadratic
+    u0 = Array(Any, n)
+    Q =  Array(Any, n)
     i = 0
     nnz = 0
     nreps = 0
-    while nnz < d+1 && nreps < 3
-        for (num,denom) in zip(nums, denoms)
+    while nnz < N+1 && nreps < 3
+        for mm in mms
             i += 1
-    #         E0, u0[i], Q[i] = qfit(getblock(nums, c...), denom, thresh)
-            E0, u0[i], Q[i] = qfit(num, denom, thresh)
+            E0, u0[i], Q[i] = qfit(mm, thresh)
             nnz += any(Q[i].!=0)
         end
-        if nnz < d+1
-            warn("Insufficent valid points in mismatch2affine. Halving thresh")
+        if nnz < N+1
+            warn("Insufficent valid points in mismatch2affine. Halving thresh and trying again.")
             thresh /= 2
             nreps += 1
             i = 0
@@ -60,14 +93,13 @@ function mismatch2affine(nums, denoms, thresh, arraysize)
         end
     end
     if nreps == 3
-        error("Decreased threshold by factor of 8, but it still wasn't enough to avoid degeneracy. There is a likely problem in the threshold.")
+        error("Decreased threshold by factor of 8, but it still wasn't enough to avoid degeneracy. It's likely there is a problem with thresh or the mismatch data.")
     end
-    s = ([arraysize...].-1)./max(1, [gsize...].-1)
-    x = cell(n)
-    i = 0
-    center = convert(Array{TFT}, ([arraysize...] .+ 1)/2)
-    for c in Counter(gsize)
-        x[i+=1] = convert(Array{TFT}, (c.-1).*s .+ 1 .- center)
+    # Solve the global sum-over-quadratics problem
+    x = Array(Vector{TFT}, n)   # knot
+    center = convert(Vector{TFT}, ([arraysize(knots)...] .+ 1)/2)
+    for (i,c) in eachknot(knots)
+        x[i] = convert(Vector{TFT}, c) - center
     end
     QB = zeros(T, d, d)
     tb = zeros(T, d)
@@ -99,7 +131,7 @@ function mismatch2affine(nums, denoms, thresh, arraysize)
     try
         rt = L\[QB[:];tb]
     catch
-        warn("The data do not suffice to determine a full affine transformation with this grid size---\n  perhaps the only supra-threshold block was the center one? Defaulting to a translation.")
+        warn("The data do not suffice to determine a full affine transformation with this grid size---\n  perhaps the only supra-threshold block was the center one?\n  Defaulting to a translation (advice: reconsider your threshold).")
         t = L[d^2+1:end, d^2+1:end]\tb
         return tformtranslate(convert(Vector{T}, t))
     end
@@ -108,25 +140,32 @@ function mismatch2affine(nums, denoms, thresh, arraysize)
     AffineTransform(convert(Matrix{T}, R), convert(Vector{T}, t))
 end
 
-# Optimize an affine transformation, given pre-calculated nums/denoms. This is not adequate
-# for large rotations/skews etc, but may be fine for polishing
-function optimize(tform::AffineTransform, numsdenoms, arraysize)
-    gsize = gridsize(numsdenoms)
-    N = length(gsize)
+"""
+`tform = optimize(tform0, mms, knots)` performs descent-based
+minimization of the total mismatch penalty as a function of the
+parameters of an affine transformation, starting from an initial guess
+`tform0`.  While this is unlikely to yield very accurate results for
+large rotations or skews (the mismatch data are themselves suspect in
+such cases), it can be helpful for polishing small deformations.
+
+For a good initial guess, see `mismatch2affine`.
+"""
+function optimize(tform::AffineTransform, mmis, knots)
+    gridsize = size(mmis)
+    N = length(gridsize)
     ndims(tform) == N || error("Dimensionality of tform is $(ndims(tform)), which does not match $N for nums/denoms")
-    bsize = blocksize(numsdenoms)
-    T = blockeltype(numsdenoms)
+    mm = first(mmis)
+    mxs = maxshift(mm)
+    T = eltype(eltype(mm))
     # Compute the bounds
-    maxshift = Int[bsize[i]>>1 for i = 1:N]
-    center = T[(arraysize[i]+1)/2 for i = 1:N]
-    s = T[(arraysize[i]-1)/(max(1,gsize[i]-1)) for i = 1:N]  # scale factor
-    X = zeros(T, N+1, prod(gsize))
-    k = 0
-    for c in Counter(gsize)
-        X[1:N,k+=1] = (c.-1).*s .+ 1 - center
-        X[N+1,k] = 1
+    asz = arraysize(knots)
+    center = T[(asz[i]+1)/2 for i = 1:N]
+    X = zeros(T, N+1, prod(gridsize))
+    for (i, knot) in enumerate(eachknot(knots))
+        X[1:N,i] = knot - center
+        X[N+1,i] = 1
     end
-    bound = convert(Vector{T}, [maxshift .- register_half; Inf])
+    bound = convert(Vector{T}, [mxs .- register_half; Inf])
     lower = repeat(-bound, outer=[1,size(X,2)])
     upper = repeat( bound, outer=[1,size(X,2)])
     # Extract the parameters from the initial guess
@@ -135,11 +174,11 @@ function optimize(tform::AffineTransform, numsdenoms, arraysize)
     A = convert(Matrix{T}, [Si-eye(N) displacement; zeros(1,N) 1])
     # Determine the blocks that start in-bounds
     AX = A*X
-    keep = trues(gsize)
+    keep = trues(gridsize)
     for j = 1:length(keep)
         for idim = 1:N
             xi = AX[idim,j]
-            if xi < -maxshift[idim]+register_half_safe || xi > maxshift[idim]-register_half_safe
+            if xi < -mxs[idim]+register_half_safe || xi > mxs[idim]-register_half_safe
                 keep[j] = false
                 break
             end
@@ -155,10 +194,8 @@ function optimize(tform::AffineTransform, numsdenoms, arraysize)
     upper[:,ignore] =  Inf
     # Assemble the objective and constraints
     constraints = Optim.ConstraintsL(X', lower', upper')
-    ws = ROWorkspace(T, maxshift, gsize, s)
-    ws.lambda_volume = zero(T)
-    gtmp = Array(T, N, gsize...)
-    objective = (x,g) -> affinepenalty!(g, x, numsdenoms, T[], ws, X', gsize, keep, gtmp)
+    gtmp = Array(Vec{N,T}, gridsize)
+    objective = (x,g) -> affinepenalty!(g, x, mmis, keep, X', gridsize, gtmp)
     @assert typeof(objective(A', T[])) == T
     result = interior(DifferentiableFunction(x->objective(x,T[]), Optim.dummy_g!, objective), A', constraints, method=:cg)
     @assert Optim.converged(result)
@@ -168,7 +205,21 @@ function optimize(tform::AffineTransform, numsdenoms, arraysize)
     AffineTransform(convert(Matrix{T}, Siopt), convert(Vector{T}, displacementopt)), result.f_minimum
 end
 
-# Penalty must be a function A -> value
+"""
+`tform = optimize_rigid(penalty, tform0, [SD = eye])` optimizes a
+rigid transformation (rotation + shift) to minimize `penalty`, a
+function mapping an affine transformation to a real value. For
+example:
+
+```
+    penalty = tform -> mismatch0(fixed, transform(moving, tform))
+```
+would result in the minimim mismatch between `fixed` and `moving`.
+
+`tform0` is an initial guess.  Use `SD` if your axes are not uniformly
+sampled, for example `SD = diagm(voxelspacing)` where `voxelspacing`
+is a vector encoding the spacing along all axes of the image.
+"""
 function optimize_rigid(penalty::Function, A::AffineTransform, SD = eye(ndims(A)); ftol=1e-4)
     R = SD*A.scalefwd/SD
     rotp = rotationparameters(R)
@@ -198,25 +249,34 @@ function optim1d{T,N}(penalty::Function, Anew::AffineTransform{T,N}, Aold = Affi
     AnewOpt, result.f_minimum
 end
 
-function optimize_per_block(nums, denoms, thresh)
-    gsize = gridsize(nums)
-    nd = length(gsize)
-    u = zeros(nd, gsize...)
+"""
+`u = optimize_per_aperture(mms, thresh)` computes the "naive"
+displacement in each aperture to minimize the mismatch. Each aperture
+is examined independently of all others. `thresh` establishes a
+threshold for the mismatch data.
+
+See also `indmin_mismatch`.
+"""
+function optimize_per_aperture(mms, thresh)
+    gridsize = size(mms)
+    nd = length(gridsize)
+    u = zeros(nd, gridsize...)
     utmp = zeros(nd)
-    for (iblock,c) in enumerate(Counter(gsize))
-        N = getblock(nums, c...)
-        D = getblock(denoms, c...)
-        ind2disp!(utmp, size(N), indminmismatch(N, D, thresh))
+    for (iblock,mm) in enumerate(mms)
+        I = indmin_mismatch(mm, thresh)
         for idim = 1:nd
-            u[idim,iblock] = utmp[idim]
+            u[idim,iblock] = I[idim]
         end
     end
     u
 end
 
 
-
-# Build the estimate of r back from the fitting parameters. Useful for debugging.
+"""
+`r = qbuild(E0, u0, Q, maxshift)` builds an estimate of the mismatch
+ratio given the quadratic form parameters `E0, u0, Q` obtained from
+`qfit`.  Often useful for debugging or visualization.
+"""
 function qbuild(E0::Real, umin::Vector, Q::Matrix, maxshift)
     d = length(maxshift)
     (size(Q,1) == d && size(Q,2) == d && length(umin) == d) || error("Size mismatch")
@@ -236,7 +296,11 @@ function qbuild(E0::Real, umin::Vector, Q::Matrix, maxshift)
     out
 end
 
-function uisvalid(u, maxshift)
+"""
+`tf = uisvalid(u, maxshift)` returns `true` if all entries of `u` are
+within the allowed domain.
+"""
+function uisvalid{T<:Number}(u::AbstractArray{T}, maxshift)
     nd = size(u,1)
     nblocks = div(length(u), nd)
     for j = 1:nblocks, idim = 1:nd
@@ -247,7 +311,10 @@ function uisvalid(u, maxshift)
     true
 end
 
-function uclamp!(u, maxshift)
+"""
+`u = uclamp!(u, maxshift)` clamps the values of `u` to the allowed domain.
+"""
+function uclamp!{T<:Number}(u::AbstractArray{T}, maxshift)
     nd = size(u,1)
     nblocks = div(length(u), nd)
     for j = 1:nblocks, idim = 1:nd
@@ -256,6 +323,11 @@ function uclamp!(u, maxshift)
     u
 end
 
+"""
+`center, cov = principalaxes(img)` computes the principal axes of an
+image `img`.  `center` is the centroid of intensity, and `cov` the
+covariance matrix of the intensity.
+"""
 @generated function principalaxes{T,N}(img::AbstractArray{T,N})
     quote
         Ts = typeof(zero(T)/1)
@@ -282,19 +354,33 @@ end
         @nexprs $N d->(V_d_d = sum(psums[d] .* ((1:length(psums[d]))-m_d).^2))
         @nexprs $N j->(@nexprs $N i->(i >= j ? V_i_j /= s : nothing))
         # Package for output
-        mean = Array(Ts, N)
-        var = Array(Ts, N, N)
-        @nexprs $N d->(mean[d] = m_d)
-        @nexprs $N j->(@nexprs $N i->(var[i,j] = i >= j ? V_i_j : V_j_i))
-        mean, var
+        center = Array(Ts, N)
+        cov = Array(Ts, N, N)
+        @nexprs $N d->(center[d] = m_d)
+        @nexprs $N j->(@nexprs $N i->(cov[i,j] = i >= j ? V_i_j : V_j_i))
+        center, cov
     end
 end
 
-# Principal axes transform. SD is the spacedimensions matrix, and
-# used so that rotations in _physical_ space result in orthogonal matrices.
-# This returns a list of AffineTransform candidates representing rotations+translations
-# that align the principal axes. The rotation is ambiguous up to 180 degrees
-# (i.e., flips of even numbers of coordinates), hence the list of candidates.
+"""
+`tfms = pat_rotation(fixed, moving, [SD=eye])` computes the Principal
+Axes Transform aligning the low-order moments of two images. The
+reference image is `fixed`, and `moving` is the raw moving image that
+you wish to align to `fixed`.  `SD` is a "spacedimensions" matrix, in
+some cases needed to ensure that rotations in *physical* space
+correspond to orthogonal matrices in array-index units.  For example,
+if your axes are not uniformly sampled, `SD = diagm(voxelspacing)`.
+
+If you're aligning many images to `fixed`, you may alternatively call
+this as `tfms = pat_rotation(fixedpa, moving, [SD=eye])`.  `fixedpa`
+is a `(center,cov)` tuple obtained from `principalaxes(fixed)`.
+
+`tfms` is a list of potential AffineTransform candidates.  PA data,
+being based on ellipsoids, are ambiguous up to rotations by 180
+degrees (i.e., sign-flips of even numbers of coordinates).
+Consequently, you may need to check all of the candidates for the one
+that produces the best alignment.
+"""
 function pat_rotation(fixedmoments::Tuple{Vector,Matrix}, moving::AbstractArray, SD = eye(ndims(moving)))
     nd = ndims(moving)
     nd > 3 && error("Dimensions higher than 3 not supported") # list-generation doesn't yet generalize
@@ -334,32 +420,6 @@ end
 pat_rotation(fixed::AbstractArray, moving::AbstractArray, SD = eye(ndims(fixed))) =
     pat_rotation(principalaxes(fixed), moving, SD)
 
-# This is ambiguous up to a rotation.
-function pat_affine(fixedmoments::Tuple{Vector,Matrix}, moving::AbstractArray, SD = eye(ndims(moving)))
-    nd = ndims(moving)
-    fmean, fvar = fixedmoments
-    nd = length(fmean)
-    fvar = SD*fvar*SD'
-    fD, fV = eig(fvar)
-    mmean, mvar = principalaxes(moving)
-    mvar = SD*mvar*SD'
-    mD, mV = eig(mvar)
-    S = (mV*Diagonal(sqrt(mD)))/(fV*Diagonal(sqrt(fD)))
-    if det(S) < 0
-        S[:,1] = -S[:,1]
-    end
-    c = ([size(moving)...].+1)/2
-    A = pat_at(S, SD, c, fmean, mmean)
-#     # Debugging check
-#     @show fvar
-#     Sp = A.scalefwd
-#     @show Sp*mvar*Sp'
-    A
-end
-
-pat_affine(fixed::AbstractArray, moving::AbstractArray, SD = eye(ndims(moving))) =
-    pat_affine(principalaxes(fixed), moving, SD)
-
 function pat_at(S, SD, c, fmean, mmean)
     Sp = SD\(S*SD)
     bp = (mmean-c) - Sp*(fmean-c)
@@ -368,21 +428,21 @@ end
 
 #### Low-level utilities
 
-function _calculate_u(At, Xt, gridsize)
+function _calculate_u{N}(At, Xt, gridsize::NTuple{N})
     Ut = Xt*At
-    u = Ut[:,1:size(Ut,2)-1]'                      # discard the dummy dimension
-    reshape(u, tuple(size(u,1), gridsize...))  # put u in the shape of the grid
+    u = Ut[:,1:size(Ut,2)-1]'                   # discard the dummy dimension
+    reinterpret(Vec{N, eltype(u)}, u, gridsize) # put u in the shape of the grid
 end
 
-function affinepenalty!(g, At, numsdenoms, uold, ws, Xt, gridsize, keep, gtmp)
+function affinepenalty!{N}(g, At, mmis, keep, Xt, gridsize::NTuple{N}, gtmp)
     u = _calculate_u(At, Xt, gridsize)
     @assert eltype(u) == eltype(At)
-    val = penalty!(gtmp, u, numsdenoms, uold, ws, keep)
+    val = penalty!(gtmp, u, mmis, keep)
     @assert isa(val, eltype(At))
-    nd = size(gtmp,1)
-    nblocks = size(Xt,1)
     if !isempty(g)
-        At_mul_Bt!(g, Xt, [reshape(gtmp,nd,nblocks); zeros(1,nblocks)])
+        T = eltype(eltype(gtmp))
+        nblocks = size(Xt,1)
+        At_mul_Bt!(g, Xt, [reinterpret(T,gtmp,(N,nblocks)); zeros(1,nblocks)])
     end
     val
 end
@@ -412,51 +472,62 @@ function p2rigid(p, SD)
     end
 end
 
-# Using the standard algorithms, the cost of matrix-multiplies is too high. We need to write these out by hand.
-for N = 1:3
-#     Np1 = N+1
-    @eval begin
-        function qfit_core!{T}(dE::Array{T,2}, V4::Array{T,2}, C::Array{T,4}, num::AbstractArray{T,$N}, denom::AbstractArray{T,$N}, thresh, umin::NTuple{$N,Int}, E0)#, tileindx::Int = 1)
-            @nexprs $N i->(@nexprs $N j->j<i?nothing:(dE_i_j = zero(T); V4_i_j = 0))
-            @nexprs $N d->(umin_d = umin[d])
-            @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 = zero(T)))))
-            @nloops $N i num begin
-                den = @nref $N denom i
-                if den > thresh
-                    @nexprs $N d->(v_d = i_d - umin_d)
-                    v2 = 0
-                    @nexprs $N d->(v2 += v_d*v_d)
-                    r = (@nref $N num i)/den
-                    dE0 = r-E0
-                    @nexprs $N j->(@nexprs $N k->k<j?nothing:(dE_j_k += dE0*v_j*v_k; V4_j_k += v2*v_j*v_k))
-                    @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 += v_iter1*v_iter2*v_iter3*v_iter4))))
-                end
+@generated function qfit_core!{T,N}(dE::Array{T,2}, V4::Array{T,2}, C::Array{T,4}, mm::Array{NumDenom{T},N}, thresh, umin::NTuple{N,Int}, E0)
+    # The cost of generic matrix-multiplies is too high, so we write
+    # these out by hand.
+    quote
+        @nexprs $N i->(@nexprs $N j->j<i?nothing:(dE_i_j = zero(T); V4_i_j = 0))
+        @nexprs $N d->(umin_d = umin[d])
+        @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 = zero(T)))))
+        @nloops $N i mm begin
+            nd = @nref $N mm i
+            num, den = nd.num, nd.denom
+            if den > thresh
+                @nexprs $N d->(v_d = i_d - umin_d)
+                v2 = 0
+                @nexprs $N d->(v2 += v_d*v_d)
+                r = num/den
+                dE0 = r-E0
+                @nexprs $N j->(@nexprs $N k->k<j?nothing:(dE_j_k += dE0*v_j*v_k; V4_j_k += v2*v_j*v_k))
+                @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 += v_iter1*v_iter2*v_iter3*v_iter4))))
             end
-            @nexprs $N i->(@nexprs $N j->j<i?(dE[i,j] = dE_j_i; V4[i,j] = V4_j_i):(dE[i,j] = dE_i_j; V4[i,j] = V4_i_j))
-            @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C[iter1,iter2,iter3,iter4] = C_iter1_iter2_iter3_iter4))))
-            sortindex = Array(Int, 4)
-            for iter1 = 1:$N, iter2 = 1:$N, iter3 = 1:$N, iter4 = 1:$N
-                sortindex[1] = iter1
-                sortindex[2] = iter2
-                sortindex[3] = iter3
-                sortindex[4] = iter4
-                sort!(sortindex)
-                C[iter1,iter2,iter3,iter4] = C[sortindex[1],sortindex[2],sortindex[3],sortindex[4]]
-            end
-            dE, V4, C
         end
+        @nexprs $N i->(@nexprs $N j->j<i?(dE[i,j] = dE_j_i; V4[i,j] = V4_j_i):(dE[i,j] = dE_i_j; V4[i,j] = V4_i_j))
+        @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C[iter1,iter2,iter3,iter4] = C_iter1_iter2_iter3_iter4))))
+        sortindex = Array(Int, 4)
+        for iter1 = 1:$N, iter2 = 1:$N, iter3 = 1:$N, iter4 = 1:$N
+            sortindex[1] = iter1
+            sortindex[2] = iter2
+            sortindex[3] = iter3
+            sortindex[4] = iter4
+            sort!(sortindex)
+            C[iter1,iter2,iter3,iter4] = C[sortindex[1],sortindex[2],sortindex[3],sortindex[4]]
+        end
+        dE, V4, C
     end
 end
 
-function qfit{T<:Real}(num::AbstractArray{T}, denom::AbstractArray{T}, thresh::Real)
+"""
+`E0, u0, Q = qfit(mm, thresh)` performs a quadratic fit of the
+mismatch data in `mm`.  On output, `u0` and `E0` hold the position and
+value, respectively, of the shift with smallest mismatch, and `Q` is a
+matrix representing the best fit to a model
+```
+    mm ≈ E0 + (u-u0)'*Q*(u-u0)
+```
+Only those shift-locations with `mm[i].denom > thresh` are used in
+performing the fit.
+"""
+function qfit(mm::MismatchArray, thresh::Real)
+    T = eltype(eltype(mm))
     threshT = convert(T, thresh)
-    d = ndims(num)
-    maxshift = ceil(Int, ([size(num)...].-1)/2)
+    d = ndims(mm)
+    mxs = maxshift(mm)
     E0 = typemax(T)
     imin = 0
-    for i = 1:length(num)
-        if denom[i] > thresh
-            r = num[i]/denom[i]
+    for (i, nd) in enumerate(mm)
+        if nd.denom > thresh
+            r = nd.num/nd.denom
             if r < E0
                 imin = i
                 E0 = r
@@ -466,15 +537,15 @@ function qfit{T<:Real}(num::AbstractArray{T}, denom::AbstractArray{T}, thresh::R
     if imin == 0
         return zero(T), zeros(T, d), zeros(T, d, d)  # no valid values
     end
-    umin = ind2sub(size(num), imin)  # not yet relative to center
+    umin = ind2sub(size(mm), imin)  # not yet relative to center
     uout = T[umin...]
     for i = 1:d
-        uout[i] -= size(num,i)>>1 + 1
+        uout[i] -= size(mm,i)>>1 + 1
     end
     dE = Array(T, d, d)
     V4 = similar(dE)
     C = zeros(T, d, d, d, d)
-    qfit_core!(dE, V4, C, num, denom, thresh, umin, E0)
+    qfit_core!(dE, V4, C, mm.data, thresh, umin, E0)
     if all(dE .== 0) || any(diag(V4) .== 0)
         return E0, uout, zeros(eltype(dE), d, d)
     end
@@ -507,7 +578,6 @@ function qfit{T<:Real}(num::AbstractArray{T}, denom::AbstractArray{T}, thresh::R
             x[indx+=1] = QL[i,j]
         end
     end
-    #This line eventually results in a call to an NLSolve constructor that only accepts Float64 types, so registration only works with Float64's
     results = nlsolve((x,fx)->QLerr!(x, fx, C, dE, similar(QL)), (x,gx)->QLjac!(x, gx, C, similar(QL)), x)
     unpackL!(QL, results.zero)
     E0, uout, QL'*QL
@@ -563,7 +633,5 @@ function QLjac!(x, gx, C, L)
         end
     end
 end
-
-#RegisterCore.getblock(A::Interpolations.BSplineInterpolation, I...) = getblock(A.coefs, I...)
 
 end

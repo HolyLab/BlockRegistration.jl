@@ -1,5 +1,6 @@
 import RegisterFit
 using Base.Test, AffineTransforms, Interpolations
+using RegisterCore
 
 ### qfit
 
@@ -19,50 +20,43 @@ function block_center(sz...)
     ntuple(i->sz[i]>>1+1, length(sz))
 end
 
-denom = ones(11,11)  # odd sizes
+denom = ones(11,11)
 Q = rand(2,2); Q = Q'*Q
 num = quadratic(11, 11, [1,-2], Q)
-E0, cntr, Qf = RegisterFit.qfit(num, denom, 1e-3)
+E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), 1e-3)
 @test abs(E0) < eps()
 @test_approx_eq cntr [1,-2]
 @test_approx_eq Qf Q
 
-denom = ones(12,13)  # even sizes
-Q = rand(2,2); Q = Q'*Q
-num = quadratic(12, 13, [2,-4], Q)
-E0, cntr, Qf = RegisterFit.qfit(num, denom, 1e-3)
-@test abs(E0) < eps()
-@test_approx_eq cntr [2,-4]
-@test_approx_eq Qf Q
 num = num+5
-E0, cntr, Qf = RegisterFit.qfit(num, denom, 1e-3)
+E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), 1e-3)
 @test_approx_eq E0 5
-@test_approx_eq cntr [2,-4]
+@test_approx_eq cntr [1,-2]
 @test_approx_eq Qf Q
 
-num = quadratic(12, 13, [2,-4], Q)
+num = quadratic(11, 13, [2,-4], Q)
 thresh = 1e-3
 scale = rand(size(num)) + thresh
-denom = denom.*scale
+denom = ones(size(num)).*scale
 @test all(denom .> thresh)
 num = num.*scale
-E0, cntr, Qf = RegisterFit.qfit(num, denom, thresh)
+E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 @test abs(E0) < eps()
 @test_approx_eq cntr [2,-4]
 @test_approx_eq Qf Q
 
 # Degenerate solutions
 Q = [1 0; 0 0]
-denom = ones(13, 12)
-num = quadratic(13, 12, [2,-4], Q)
-E0, cntr, Qf = RegisterFit.qfit(num, denom, thresh)
+denom = ones(13, 11)
+num = quadratic(13, 11, [2,-4], Q)
+E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 @test abs(E0) < eps()
 @test_approx_eq cntr[1] 2
 @test_approx_eq Qf Q
 a = rand(2)
 Q = a*a'
-num = quadratic(13, 12, [2,-4], Q)
-E0, cntr, Qf = RegisterFit.qfit(num, denom, thresh)
+num = quadratic(13, 11, [2,-4], Q)
+E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 @test abs(E0) < eps()
 @test abs(dot(cntr-[2,-4], a)) < eps()
 @test_approx_eq Qf Q
@@ -75,7 +69,7 @@ num0 = quadratic(5, 5, [0,0], Q)
 denom = copy(denom0); denom[1:2,1] *= 100; denom[5,5] *= 100
 num = copy(num0); num[1:2,1] *= 100; num[5,5] *= 100
 thresh = 2
-E0, cntr, Qf = RegisterFit.qfit(num, denom, thresh)
+E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 
 ### Principal Axes Transformation
 

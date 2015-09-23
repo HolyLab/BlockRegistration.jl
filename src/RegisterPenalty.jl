@@ -115,10 +115,13 @@ involves just `mmis[i]` and `ϕ.u[:,i]`.  `mmis[i]` must be
 interpolating, so that it can be evaluated for fractional shifts.
 """
 function penalty!{T,Dim,A<:AbstractInterpolation}(g, ϕ::AbstractDeformation, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
+    penalty!(g, ϕ.u, mmis, keep)
+end
+
+function penalty!{T,Dim,A<:AbstractInterpolation}(g, u::AbstractArray, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
     # This "outer" function just handles the chain rule for computing the
     # total penalty and gradient. The "real" work is done by penalty_nd!.
     nblocks = length(mmis)
-    u = ϕ.u
     length(u) == nblocks || error("u should have length $nblocks, but length(u) = $(length(u))")
     calc_gradient = g != nothing && !isempty(g)
     if calc_gradient
