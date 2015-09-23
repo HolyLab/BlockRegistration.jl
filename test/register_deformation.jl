@@ -154,32 +154,8 @@ uc = reinterpret(Float64, ϕc.u, (2, gridsize...))
 u2 = reinterpret(Float64, ϕ2.u, (2, gridsize...))
 @test_approx_eq_eps uc u2 0.02
 
-# Test gradient computation
-gridsize = (11,11)
-u1 = randn(2, gridsize...)
-u2 = randn(2, gridsize...)
-imsz = (100,101)
-ϕ1 = interpolate(RegisterDeformation.GridDeformation(u1, imsz))
-ϕ2 = interpolate(RegisterDeformation.GridDeformation(u2, imsz))
-ϕ, g = RegisterDeformation.compose(ϕ1, ϕ2)
-# A function that ForwardDiff will be happy with
-function compose_u(u1, u2, shp, imsz)
-    ϕ1 = interpolate(RegisterDeformation.GridDeformation(u1, imsz))
-    ϕ2 = interpolate(RegisterDeformation.GridDeformation(reshape(u2, shp), imsz))
-    ϕ = ϕ1(ϕ2)
-    ret = Array(eltype(eltype(ϕ.u)), prod(shp))
-    i = 0
-    for v in ϕ.u
-        for d = 1:length(v)
-            ret[i+=1] = v[d]
-        end
-    end
-    ret
-end
-Base.real(x::ForwardDiff.GradientNumber) = x.value
-u2vec = vec(u2)
-j = ForwardDiff.jacobian(u2vec -> compose_u(u1, u2vec, size(u1), imsz))
-gj = j(u2vec)
+## Test gradient computation
+
 function compare_g(g, gj, gridsize)
     for j = 1:gridsize[2], i = 1:gridsize[1]
         indx = sub2ind(gridsize, i, j)
@@ -194,11 +170,39 @@ function compare_g(g, gj, gridsize)
     end
     nothing
 end
-compare_g(g, gj, gridsize)
+
+# A composition function that ForwardDiff will be happy with
+function compose_u(ϕ1, u2, f, shp, imsz)
+    ϕ2 = f(RegisterDeformation.GridDeformation(reshape(u2, shp), imsz))
+    ϕ = ϕ1(ϕ2)
+    ret = Array(eltype(eltype(ϕ.u)), prod(shp))
+    i = 0
+    for v in ϕ.u
+        for d = 1:length(v)
+            ret[i+=1] = v[d]
+        end
+    end
+    ret
+end
+
+gridsize = (11,11)
+u1 = randn(2, gridsize...)
+u2 = randn(2, gridsize...)
+imsz = (100,101)
+ϕ1 = interpolate(RegisterDeformation.GridDeformation(u1, imsz))
+for f in (interpolate, identity)
+    ϕ2 = f(RegisterDeformation.GridDeformation(u2, imsz))
+    ϕ, g = RegisterDeformation.compose(ϕ1, ϕ2)
+    Base.real(x::ForwardDiff.GradientNumber) = x.value
+    u2vec = vec(u2)
+    j = ForwardDiff.jacobian(u2vec -> compose_u(ϕ1, u2vec, f, size(u2), imsz))
+    gj = j(u2vec)
+    compare_g(g, gj, gridsize)
+end
 
 # Test identity-composition
 _, g = RegisterDeformation.compose(identity, ϕ2)
-fill!(gj, 0)
+gj = zeros(2*prod(gridsize), 2*prod(gridsize))
 for i = 1:prod(gridsize)
     rng = 2*(i-1)+1:2i
     gj[rng,rng] = eye(2,2)

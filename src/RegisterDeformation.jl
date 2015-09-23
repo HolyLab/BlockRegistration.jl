@@ -8,6 +8,7 @@ import Interpolations: AbstractInterpolation, AbstractExtrapolation
 
 export
     # types
+    AbstractDeformation,
     GridDeformation,
     WarpedArray,
     # functions
@@ -16,7 +17,9 @@ export
     translate,
     warp,
     warp!,
-    warpgrid
+    warpgrid,
+    vecindex,
+    vecgradient!
 
 typealias DimsLike Union{Vector{Int}, Dims}
 typealias InterpExtrap Union{AbstractInterpolation,AbstractExtrapolation}
@@ -51,6 +54,8 @@ The major functions/types exported by RegisterDeformation are:
 RegisterDeformation
 
 abstract AbstractDeformation{T,N}
+Base.eltype{T,N}(::Type{AbstractDeformation{T,N}}) = T
+Base.ndims{T,N}(::Type{AbstractDeformation{T,N}}) = N
 
 """
 `ϕ = GridDeformation(u::Array{FixedVector}, dims)` creates a
@@ -172,8 +177,8 @@ Interpolations.interpolate{ T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,
 
 Interpolations.interpolate!{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}) = error("ϕ is already interpolating")
 
-function Base.getindex{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}, x::FixedVector{N})
-    x + ϕ.u[x]
+function vecindex{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}, x::FixedVector{N})
+    x + vecindex(ϕ.u, x)
 end
 
 @generated function Base.getindex{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}, xs::Number...)
@@ -187,23 +192,29 @@ end
 end
 
 # Composition ϕ_old(ϕ_new(x))
-function Base.call{T,N,A<:AbstractInterpolation}(
-        ϕ_old::GridDeformation{T,N,A}, ϕ_new::GridDeformation)
+function Base.call{T1,T2,N,A<:AbstractInterpolation}(
+        ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
     u, knots = ϕ_old.u, ϕ_old.knots
+    if !isa(ϕ_new.u, AbstractInterpolation)
+        ϕ_new.knots == knots || error("If knots are incommensurate, ϕ_new must be interpolating")
+    end
     sz = map(length, knots)
     x = knot(knots, 1)
-    out = _compose(u, ϕ_new, x)
+    out = _compose(u, ϕ_new, x, 1)
     ucomp = similar(u, typeof(out))
     for I in CartesianRange(sz)
-        ucomp[I] = _compose(u, ϕ_new, knot(knots, I))
+        ucomp[I] = _compose(u, ϕ_new, knot(knots, I), I)
     end
     GridDeformation(ucomp, knots)
 end
 
-function _compose(u, ϕ_new, x)
-    dx = ϕ_new.u[x]
-    dx + u[x+dx]
+function _compose(u, ϕ_new, x, i)
+    dx = lookup(ϕ_new.u, x, i)
+    dx + vecindex(u, x+dx)
 end
+
+lookup(u::AbstractInterpolation, x, i) = vecindex(u, x)
+lookup(u, x, i) = u[i]
 
 @generated function knot{N}(knots::NTuple{N}, i::Integer)
     args = [:(knots[$d][i]) for d = 1:N]
@@ -227,12 +238,13 @@ position `(i,j,...)`.
 You can use `_, g = compose(identity, ϕ_new)` if you need the gradient
 for when `ϕ_old` is equal to the identity transformation.
 """
-function compose{T,N,A<:AbstractInterpolation}(
-        ϕ_old::GridDeformation{T,N,A}, ϕ_new::GridDeformation)
+function compose{T1,T2,N,A<:AbstractInterpolation}(
+        ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
     u, knots = ϕ_old.u, ϕ_old.knots
+    ϕ_new.knots == knots || error("Not yet implemented for incommensurate knots")
     sz = map(length, knots)
     x = knot(knots, 1)
-    out = _compose(u, ϕ_new, x)
+    out = _compose(u, ϕ_new, x, 1)
     ucomp = similar(u, typeof(out))
     TG = Mat{N,N,eltype(out)}
     g = Array(TG, size(u))
@@ -240,9 +252,10 @@ function compose{T,N,A<:AbstractInterpolation}(
     eyeN = eye(TG)
     for I in CartesianRange(sz)
         x = knot(knots, I)
-        y = ϕ_new[x]
-        ucomp[I] = y - x + u[y]
-        gradient!(gtmp, u, y)
+        dx = lookup(ϕ_new.u, x, I)
+        y = x + dx
+        ucomp[I] = dx + vecindex(u, y)
+        vecgradient!(gtmp, u, y)
         g[I] = convert(TG, gtmp) + eyeN
     end
     GridDeformation(ucomp, knots), g
@@ -425,16 +438,16 @@ to_etp(etp::AbstractExtrapolation) = etp
 to_etp(img, A::AffineTransform) = TransformedArray(to_etp(img), A)
 
 # Extensions to Interpolations and FixedSizedArrays
-@generated function Base.getindex{T,N}(itp::ScaledInterpolation{T,N}, x::FixedVector{N})
+@generated function vecindex{N}(A::AbstractArray, x::FixedVector{N})
     args = [:(x[$d]) for d = 1:N]
     meta = Expr(:meta, :inline)
     quote
         $meta
-        getindex(itp, $(args...))
+        getindex(A, $(args...))
     end
 end
 
-@generated function Interpolations.gradient!{T,N}(g, itp::ScaledInterpolation{T,N}, x::FixedVector{N})
+@generated function vecgradient!{N}(g, itp::AbstractArray, x::FixedVector{N})
     args = [:(x[$d]) for d = 1:N]
     meta = Expr(:meta, :inline)
     quote
