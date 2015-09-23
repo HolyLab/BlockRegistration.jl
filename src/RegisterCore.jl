@@ -19,7 +19,8 @@ export
     # functions
     maxshift,
     indmin_mismatch,
-    separate
+    separate,
+    mismatcharrays
 
 """
 # RegisterCore
@@ -241,6 +242,42 @@ function _packnd!(numdenom::CenterIndexedArray, num::CenterIndexedArray, denom::
         @inbounds numdenom[I] = NumDenom(num[I], denom[I])
     end
     numdenom
+end
+
+# The next are mostly used just for testing
+"""
+`mms = mismatcharrays(nums, denoms)` packs array-of-arrays num/denom pairs as an array-of-MismatchArrays.
+
+`mms = mismatcharrays(nums, denom)`, for `denom` a single array, uses the same `denom` array for all `nums`.
+"""
+function mismatcharrays{A<:AbstractArray,T<:Number}(nums::AbstractArray{A}, denom::AbstractArray{T})
+    first = true
+    local mms
+    for i in eachindex(nums)
+        num = nums[i]
+        mm = MismatchArray(num, denom)
+        if first
+            mms = Array(typeof(mm), size(nums))
+            first = false
+        end
+        mms[i] = mm
+    end
+    mms
+end
+
+function mismatcharrays{A1<:AbstractArray,A2<:AbstractArray}(nums::AbstractArray{A1}, denoms::AbstractArray{A2})
+    size(nums) == size(denoms) || throw(DimensionMismatch("nums and denoms arrays must have the same number of apertures"))
+    first = true
+    local mms
+    for i in eachindex(nums, denoms)
+        mm = MismatchArray(nums[i], denoms[i])
+        if first
+            mms = Array(typeof(mm), size(nums))
+            first = false
+        end
+        mms[i] = mm
+    end
+    mms
 end
 
 """
