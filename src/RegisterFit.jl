@@ -1,17 +1,11 @@
-__precompile__()
+# __precompile__()
 
 module RegisterFit
 
-using Compat, Optim, NLsolve, RegisterPenalty, RegisterCore, AffineTransforms, Grid, Interpolations, Optim1d
+using Optim, NLsolve, RegisterPenalty, RegisterCore, AffineTransforms, Grid, Interpolations, Optim1d
 import Optim: optimize, nelder_mead
 
-if VERSION < v"0.4.0-dev"
-    import Base: @nloops, @nexprs, @nref, @ngenerate
-else
-    import Base: @nloops, @nexprs, @nref
-    using Compat
-    import Compat: @ngenerate
-end
+import Base: @nloops, @nexprs, @nref
 
 export
     mismatch2affine,
@@ -34,7 +28,7 @@ const register_half_safe = 0.51
 function mismatch2affine(nums, denoms, thresh, arraysize)
     gsize = gridsize(nums)
     d = length(gsize)
-    B = getblock(nums, ones(Int, d)...)
+    B = first(nums)
     T = eltype(B)
     TFT = typeof(one(T)/2)  # transformtype; it needs to be a floating-point type
     n = prod(gsize)
@@ -51,14 +45,14 @@ function mismatch2affine(nums, denoms, thresh, arraysize)
     nnz = 0
     nreps = 0
     while nnz < d+1 && nreps < 3
-        for c in Counter(gsize)
+        for (num,denom) in zip(nums, denoms)
             i += 1
     #         E0, u0[i], Q[i] = qfit(getblock(nums, c...), denom, thresh)
-            E0, u0[i], Q[i] = qfit(getblock(nums, c...), getblock(denoms, c...), thresh)
+            E0, u0[i], Q[i] = qfit(num, denom, thresh)
             nnz += any(Q[i].!=0)
         end
         if nnz < d+1
-            warn("Halving thresh")
+            warn("Insufficent valid points in mismatch2affine. Halving thresh")
             thresh /= 2
             nreps += 1
             i = 0
@@ -66,7 +60,7 @@ function mismatch2affine(nums, denoms, thresh, arraysize)
         end
     end
     if nreps == 3
-        error("Decreased threshold by factor of 8, but it still wasn't enough to avoid degeneracy")
+        error("Decreased threshold by factor of 8, but it still wasn't enough to avoid degeneracy. There is a likely problem in the threshold.")
     end
     s = ([arraysize...].-1)./max(1, [gsize...].-1)
     x = cell(n)
@@ -262,36 +256,38 @@ function uclamp!(u, maxshift)
     u
 end
 
-@ngenerate N (Vector, Matrix) function principalaxes{T,N}(img::AbstractArray{T,N})
-    Ts = typeof(zero(T)/1)
-    psums = Vector{Ts}[zeros(Ts, size(img, d)) for d = 1:N]  # partial sums along all but one axis
-    # Use a two-pass algorithm
-    # First the partial sums, which we use to compute the centroid
-    @nloops N I img begin
-        @inbounds v = @nref N img I
-        if !isnan(v)
-            @inbounds (@nexprs N d->(psums[d][I_d] += v))
+@generated function principalaxes{T,N}(img::AbstractArray{T,N})
+    quote
+        Ts = typeof(zero(T)/1)
+        psums = Vector{Ts}[zeros(Ts, size(img, d)) for d = 1:N]  # partial sums along all but one axis
+        # Use a two-pass algorithm
+        # First the partial sums, which we use to compute the centroid
+        @nloops $N I img begin
+            @inbounds v = @nref $N img I
+            if !isnan(v)
+                @inbounds (@nexprs $N d->(psums[d][I_d] += v))
+            end
         end
-    end
-    s = sum(psums[1])
-    pmeans = Ts[sum(psums[d] .* (1:length(psums[d]))) for d = 1:N]
-    @nexprs N d->(m_d = pmeans[d]/s)
-    # Now the variance
-    @nexprs N j->(@nexprs N i->(i >= j ? V_i_j = zero(Ts) : nothing))  # will hold intensity-weighted variance
-    @nloops N I img begin
-        @inbounds v = @nref N img I
-        if !isnan(v)
-            @nexprs N j->(@nexprs N i->(i > j ? V_i_j += v*(I_i-m_i)*(I_j-m_j) : nothing))
+        s = sum(psums[1])
+        pmeans = Ts[sum(psums[d] .* (1:length(psums[d]))) for d = 1:N]
+        @nexprs $N d->(m_d = pmeans[d]/s)
+        # Now the variance
+        @nexprs $N j->(@nexprs $N i->(i >= j ? V_i_j = zero(Ts) : nothing))  # will hold intensity-weighted variance
+        @nloops $N I img begin
+            @inbounds v = @nref $N img I
+            if !isnan(v)
+                @nexprs $N j->(@nexprs $N i->(i > j ? V_i_j += v*(I_i-m_i)*(I_j-m_j) : nothing))
+            end
         end
+        @nexprs $N d->(V_d_d = sum(psums[d] .* ((1:length(psums[d]))-m_d).^2))
+        @nexprs $N j->(@nexprs $N i->(i >= j ? V_i_j /= s : nothing))
+        # Package for output
+        mean = Array(Ts, N)
+        var = Array(Ts, N, N)
+        @nexprs $N d->(mean[d] = m_d)
+        @nexprs $N j->(@nexprs $N i->(var[i,j] = i >= j ? V_i_j : V_j_i))
+        mean, var
     end
-    @nexprs N d->(V_d_d = sum(psums[d] .* ((1:length(psums[d]))-m_d).^2))
-    @nexprs N j->(@nexprs N i->(i >= j ? V_i_j /= s : nothing))
-    # Package for output
-    mean = Array(Ts, N)
-    var = Array(Ts, N, N)
-    @nexprs N d->(mean[d] = m_d)
-    @nexprs N j->(@nexprs N i->(var[i,j] = i >= j ? V_i_j : V_j_i))
-    mean, var
 end
 
 # Principal axes transform. SD is the spacedimensions matrix, and
@@ -299,7 +295,7 @@ end
 # This returns a list of AffineTransform candidates representing rotations+translations
 # that align the principal axes. The rotation is ambiguous up to 180 degrees
 # (i.e., flips of even numbers of coordinates), hence the list of candidates.
-function pat_rotation(fixedmoments::@compat(Tuple{Vector,Matrix}), moving::AbstractArray, SD = eye(ndims(moving)))
+function pat_rotation(fixedmoments::Tuple{Vector,Matrix}, moving::AbstractArray, SD = eye(ndims(moving)))
     nd = ndims(moving)
     nd > 3 && error("Dimensions higher than 3 not supported") # list-generation doesn't yet generalize
     fmean, fvar = fixedmoments
@@ -339,7 +335,7 @@ pat_rotation(fixed::AbstractArray, moving::AbstractArray, SD = eye(ndims(fixed))
     pat_rotation(principalaxes(fixed), moving, SD)
 
 # This is ambiguous up to a rotation.
-function pat_affine(fixedmoments::@compat(Tuple{Vector,Matrix}), moving::AbstractArray, SD = eye(ndims(moving)))
+function pat_affine(fixedmoments::Tuple{Vector,Matrix}, moving::AbstractArray, SD = eye(ndims(moving)))
     nd = ndims(moving)
     fmean, fvar = fixedmoments
     nd = length(fmean)
@@ -492,12 +488,12 @@ function qfit{T<:Real}(num::AbstractArray{T}, denom::AbstractArray{T}, thresh::R
     Q = Minv*dE*Minv
     local QL
     try
-        QL = full(@compat(chol(Q, Val{:L})))
+        QL = full(chol(Q, Val{:L}))
     catch err
         if isa(err, LinAlg.PosDefException)
             warn("Fixing positive-definite exception:")
             @show V4 dE M Q
-            QL = full(@compat(chol(Q+0.001*mean(diag(Q))*I, Val{:L})))
+            QL = full(chol(Q+0.001*mean(diag(Q))*I, Val{:L}))
         else
             rethrow(err)
         end
@@ -568,6 +564,6 @@ function QLjac!(x, gx, C, L)
     end
 end
 
-RegisterCore.getblock(A::Interpolations.BSplineInterpolation, I...) = getblock(A.coefs, I...)
+#RegisterCore.getblock(A::Interpolations.BSplineInterpolation, I...) = getblock(A.coefs, I...)
 
 end

@@ -1,5 +1,5 @@
 import RegisterFit
-using Base.Test
+using Base.Test, AffineTransforms, Interpolations
 
 ### qfit
 
@@ -95,12 +95,12 @@ for i = 1:2
     @test abs(S[2,2]) < 1e-8
 end
 
-using ImageTransform
 F = Images.meanfinite(abs(fixed), (1,2))[1]
 df = zeros(2)
+movinge = extrapolate(interpolate(moving, BSpline{Linear}, OnGrid), NaN)
 for i = 1:2
-    mov = imtransform(moving, tfm[i])
-    df[i] = Images.meanfinite(abs(fixed-mov), (1,2))[1]
+    mov = TransformedArray(movinge, tfm[i])
+    df[i] = Images.meanfinite(abs(fixed-transform(mov)), (1,2))[1]
 end
 @test minimum(df) < 1e-4*F
 
