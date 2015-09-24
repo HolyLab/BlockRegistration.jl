@@ -55,6 +55,7 @@ B = copy(A)
 @test vec(A) == vec(data)
 
 @test minimum(A) == minimum(data)
+@test maximum(A) == maximum(data)
 @test minimum(A,1) == minimum(data,1)
 @test maximum(A,2) == maximum(data,2)
 

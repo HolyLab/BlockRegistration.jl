@@ -154,4 +154,30 @@ writemime(io::IO, ::MIME"text/plain", X::CenterIndexedArray) =
 show(io::IO, X::CenterIndexedArray) = show(io, X.data)
 showcompact(io::IO, X::CenterIndexedArray) = showcompact(io, X.data)
 
+# Remove when the LinearSlow patch gets merged
+Base.vec(A::CenterIndexedArray) = vec(A.data)
+Base.minimum(A::CenterIndexedArray) = minimum(A.data)
+Base.maximum(A::CenterIndexedArray) = maximum(A.data)
+function Base.findmin(A::CenterIndexedArray)
+    val, idx = findmin(A.data)
+    val, cia_index(A, idx)
+end
+function Base.findmax(A::CenterIndexedArray)
+    val, idx = findmax(A.data)
+    val, cia_index(A, idx)
+end
+function Base.findn(A::CenterIndexedArray)
+    ret = findn(A.data)
+    ntuple(d->ret[d]-A.halfsize[d]-1, ndims(A))
+end
+
+
+@generated function cia_index{T,N}(A::CenterIndexedArray{T,N}, idx)
+    args = [:(s[$d]-A.halfsize[$d]-1) for d = 1:N]
+    quote
+        s = ind2sub(size(A), idx)
+        CartesianIndex{N}(($(args...),))
+    end
+end
+
 end  # module
