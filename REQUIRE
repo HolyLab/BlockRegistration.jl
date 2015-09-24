@@ -1,0 +1,8 @@
+Images
+Interpolations
+AffineTransforms
+FixedSizeArrays
+Optim
+NLsolve
+CUDArt
+CUFFT

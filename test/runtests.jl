@@ -1,3 +1,5 @@
+using BlockRegistration
+
 function runtest(filename)
     println(filename)
     include(filename)
