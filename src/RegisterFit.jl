@@ -1,0 +1,637 @@
+# __precompile__()
+
+module RegisterFit
+
+using Optim, NLsolve, RegisterPenalty, RegisterCore, AffineTransforms, Interpolations, Optim1d, FixedSizeArrays
+import Optim: optimize, nelder_mead
+
+import Base: @nloops, @nexprs, @nref
+
+export
+    mismatch2affine,
+    optimize,
+    optimize_per_aperture,
+    optimize_rigid,
+    pat_rotation,
+    principalaxes,
+    qbuild,
+    qfit,
+    uisvalid,
+    uclamp!
+
+"""
+# RegisterFit
+
+This module contains a number of functions that calculate affine
+transformations that minimize mismatch.  The functions are organized
+into categories:
+
+### Global optimization
+
+- `mismatch2affine`: a transformation computed from mismatch data by least squares
+- `pat_rotation`: find the optimal rigid transform via a Principal Axes Transformation
+- `optimize_per_aperture`: naive registration using independent apertures
+
+### Local optimization
+
+- `optimize_rigid`: iterative improve a rigid transformation given raw images
+- `optimize`: iteratively improve an affine transform given mismatch data
+
+### Utilities
+
+- `qfit`: fit a single aperture's mismatch data to a quadratic form
+- `qbuild`: reconstruct mismatch data from a quadratic form
+- `uclamp!` and `uisvalid!`: check/enforce bounds on optimization
+
+"""
+
+# For bounds constraints
+const register_half = 0.5001
+const register_half_safe = 0.51
+
+"""
+`tform = mismatch2affine(mms, thresh, knots)` returns an affine
+transformation that is a "best initial guess" for the transformation
+that would minimize the mismatch.  The mismatch is encoded in `mms`
+(of the format returned by RegisterMismatch), and `thresh` is the
+denominator-threshold that determines regions that have sufficient
+pixel/intensity overlap to be considered valid.  `knots` represents
+the aperture centers (see RegisterDeformation).
+
+The algorithm is based on fitting each aperture to a quadratic, and
+then performing a least-squares minimization of the
+sum-over-apertures.  The strength of this procedure is that it finds a
+global solution; however, it is based on a coarse approximation, the
+quadratic fit.  If you want to polish `tform` without relying on the
+quadratic fit, see `optimize`.
+"""
+function mismatch2affine(mms, thresh, knots)
+    gridsize = size(mms)
+    N = length(gridsize)
+    mm = first(mms)
+    T = eltype(eltype(mm))
+    TFT = typeof(one(T)/2)  # transformtype; it needs to be a floating-point type
+    n = prod(gridsize)
+    # Fit the parameters of each quadratic
+    u0 = Array(Any, n)
+    Q =  Array(Any, n)
+    i = 0
+    nnz = 0
+    nreps = 0
+    while nnz < N+1 && nreps < 3
+        for mm in mms
+            i += 1
+            E0, u0[i], Q[i] = qfit(mm, thresh)
+            nnz += any(Q[i].!=0)
+        end
+        if nnz < N+1
+            warn("Insufficent valid points in mismatch2affine. Halving thresh and trying again.")
+            thresh /= 2
+            nreps += 1
+            i = 0
+            nnz = 0
+        end
+    end
+    if nreps == 3
+        error("Decreased threshold by factor of 8, but it still wasn't enough to avoid degeneracy. It's likely there is a problem with thresh or the mismatch data.")
+    end
+    # Solve the global sum-over-quadratics problem
+    x = Array(Vector{TFT}, n)   # knot
+    center = convert(Vector{TFT}, ([arraysize(knots)...] .+ 1)/2)
+    for (i,c) in eachknot(knots)
+        x[i] = convert(Vector{TFT}, c) - center
+    end
+    QB = zeros(T, d, d)
+    tb = zeros(T, d)
+    L = zeros(T, d*(d+1), d*(d+1))
+    for i = 1:n
+        tQ = Q[i]
+        tx = x[i]
+        xu = tx+u0[i]
+        tmp = tQ*xu
+        QB += tmp*tx'
+        tb += tmp
+        for m=1:d, l=1:d, k=1:d, j=1:d
+            L[j+(k-1)*d, l+(m-1)*d] += tQ[j,l]*tx[m]*tx[k]
+        end
+        for l=1:d, k=1:d, j=1:d
+            L[j+(k-1)*d, d*d+l] += tQ[j,l]*tx[k]
+        end
+        for m=1:d, l=1:d, j=1:d
+            L[d*d+j, l+(m-1)*d] += tQ[j,l]*tx[m]
+        end
+        for l=1:d, j=1:d
+            L[d*d+j, d*d+l] += tQ[j,l]
+        end
+    end
+    if all(L .== 0)
+        error("All elements of L are zero. It's likely thresh is too high.")
+    end
+    local rt
+    try
+        rt = L\[QB[:];tb]
+    catch
+        warn("The data do not suffice to determine a full affine transformation with this grid size---\n  perhaps the only supra-threshold block was the center one?\n  Defaulting to a translation (advice: reconsider your threshold).")
+        t = L[d^2+1:end, d^2+1:end]\tb
+        return tformtranslate(convert(Vector{T}, t))
+    end
+    R = reshape(rt[1:d*d], d, d)
+    t = rt[d*d+1:end]
+    AffineTransform(convert(Matrix{T}, R), convert(Vector{T}, t))
+end
+
+"""
+`tform = optimize(tform0, mms, knots)` performs descent-based
+minimization of the total mismatch penalty as a function of the
+parameters of an affine transformation, starting from an initial guess
+`tform0`.  While this is unlikely to yield very accurate results for
+large rotations or skews (the mismatch data are themselves suspect in
+such cases), it can be helpful for polishing small deformations.
+
+For a good initial guess, see `mismatch2affine`.
+"""
+function optimize(tform::AffineTransform, mmis, knots)
+    gridsize = size(mmis)
+    N = length(gridsize)
+    ndims(tform) == N || error("Dimensionality of tform is $(ndims(tform)), which does not match $N for nums/denoms")
+    mm = first(mmis)
+    mxs = maxshift(mm)
+    T = eltype(eltype(mm))
+    # Compute the bounds
+    asz = arraysize(knots)
+    center = T[(asz[i]+1)/2 for i = 1:N]
+    X = zeros(T, N+1, prod(gridsize))
+    for (i, knot) in enumerate(eachknot(knots))
+        X[1:N,i] = knot - center
+        X[N+1,i] = 1
+    end
+    bound = convert(Vector{T}, [mxs .- register_half; Inf])
+    lower = repeat(-bound, outer=[1,size(X,2)])
+    upper = repeat( bound, outer=[1,size(X,2)])
+    # Extract the parameters from the initial guess
+    Si = tform.scalefwd
+    displacement = tform.offset
+    A = convert(Matrix{T}, [Si-eye(N) displacement; zeros(1,N) 1])
+    # Determine the blocks that start in-bounds
+    AX = A*X
+    keep = trues(gridsize)
+    for j = 1:length(keep)
+        for idim = 1:N
+            xi = AX[idim,j]
+            if xi < -mxs[idim]+register_half_safe || xi > mxs[idim]-register_half_safe
+                keep[j] = false
+                break
+            end
+        end
+    end
+    if !any(keep)
+        @show tform
+        warn("No valid blocks were found")
+        return tform
+    end
+    ignore = !keep[:]
+    lower[:,ignore] = -Inf
+    upper[:,ignore] =  Inf
+    # Assemble the objective and constraints
+    constraints = Optim.ConstraintsL(X', lower', upper')
+    gtmp = Array(Vec{N,T}, gridsize)
+    objective = (x,g) -> affinepenalty!(g, x, mmis, keep, X', gridsize, gtmp)
+    @assert typeof(objective(A', T[])) == T
+    result = interior(DifferentiableFunction(x->objective(x,T[]), Optim.dummy_g!, objective), A', constraints, method=:cg)
+    @assert Optim.converged(result)
+    Aopt = result.minimum'
+    Siopt = Aopt[1:N,1:N] + eye(N)
+    displacementopt = Aopt[1:N,end]
+    AffineTransform(convert(Matrix{T}, Siopt), convert(Vector{T}, displacementopt)), result.f_minimum
+end
+
+"""
+`tform = optimize_rigid(penalty, tform0, [SD = eye])` optimizes a
+rigid transformation (rotation + shift) to minimize `penalty`, a
+function mapping an affine transformation to a real value. For
+example:
+
+```
+    penalty = tform -> mismatch0(fixed, transform(moving, tform))
+```
+would result in the minimim mismatch between `fixed` and `moving`.
+
+`tform0` is an initial guess.  Use `SD` if your axes are not uniformly
+sampled, for example `SD = diagm(voxelspacing)` where `voxelspacing`
+is a vector encoding the spacing along all axes of the image.
+"""
+function optimize_rigid(penalty::Function, A::AffineTransform, SD = eye(ndims(A)); ftol=1e-4)
+    R = SD*A.scalefwd/SD
+    rotp = rotationparameters(R)
+    dx = A.offset
+    p0 = [rotp; dx]
+    objective = p -> penalty(p2rigid(p, SD))
+    results = nelder_mead(objective, p0, initial_step=[fill(0.05, length(rotp)); ones(length(dx))], ftol=ftol)
+    p2rigid(results.minimum, SD), results.f_minimum
+end
+
+function optim1d{T,N}(penalty::Function, Anew::AffineTransform{T,N}, Aold = AffineTransform(eye(T,N),zeros(T,N)); p0 = NaN)
+    if !isfinite(p0)
+        p0 = penalty(Aold)
+    end
+    # Factor Anew so we can take powers of it
+    Anewm = [Anew.scalefwd Anew.offset; zeros(T, 1, N) one(T)]
+    D, V = eig(Anewm)
+    penalty1d = alpha->factoredaffinepenalty(penalty, alpha, Aold, D, V)
+    # Pick trial step so that 1.0 will be the highest value tested among the first three
+    al, am, ar = bracket(penalty1d, 0.0, 1/2.618, p0)
+    @show al, am, ar
+    result = Optim.brent(penalty1d, al, ar)
+    @show result.minimum
+    AnewOpt = factoredaffine(result.minimum, D, V)
+    @show AnewOpt
+    @show Aold
+    AnewOpt, result.f_minimum
+end
+
+"""
+`u = optimize_per_aperture(mms, thresh)` computes the "naive"
+displacement in each aperture to minimize the mismatch. Each aperture
+is examined independently of all others. `thresh` establishes a
+threshold for the mismatch data.
+
+See also `indmin_mismatch`.
+"""
+function optimize_per_aperture(mms, thresh)
+    gridsize = size(mms)
+    nd = length(gridsize)
+    u = zeros(nd, gridsize...)
+    utmp = zeros(nd)
+    for (iblock,mm) in enumerate(mms)
+        I = indmin_mismatch(mm, thresh)
+        for idim = 1:nd
+            u[idim,iblock] = I[idim]
+        end
+    end
+    u
+end
+
+
+"""
+`r = qbuild(E0, u0, Q, maxshift)` builds an estimate of the mismatch
+ratio given the quadratic form parameters `E0, u0, Q` obtained from
+`qfit`.  Often useful for debugging or visualization.
+"""
+function qbuild(E0::Real, umin::Vector, Q::Matrix, maxshift)
+    d = length(maxshift)
+    (size(Q,1) == d && size(Q,2) == d && length(umin) == d) || error("Size mismatch")
+    szoutv = 2*[maxshift...]+1
+    out = zeros(eltype(Q), tuple(szoutv...))
+    j = 1
+    du = similar(umin)
+    Qdu = similar(umin)
+    for c in Counter(szoutv)
+        for idim = 1:d
+            du[idim] = c[idim] - maxshift[idim] - 1 - umin[idim]
+        end
+        uQu = dot(du, A_mul_B!(Qdu, Q, du))
+        out[j] = E0 + uQu
+        j += 1
+    end
+    out
+end
+
+"""
+`tf = uisvalid(u, maxshift)` returns `true` if all entries of `u` are
+within the allowed domain.
+"""
+function uisvalid{T<:Number}(u::AbstractArray{T}, maxshift)
+    nd = size(u,1)
+    nblocks = div(length(u), nd)
+    for j = 1:nblocks, idim = 1:nd
+        if abs(u[idim,j]) >= maxshift[idim]-register_half
+            return false
+        end
+    end
+    true
+end
+
+"""
+`u = uclamp!(u, maxshift)` clamps the values of `u` to the allowed domain.
+"""
+function uclamp!{T<:Number}(u::AbstractArray{T}, maxshift)
+    nd = size(u,1)
+    nblocks = div(length(u), nd)
+    for j = 1:nblocks, idim = 1:nd
+        u[idim,j] = max(-maxshift[idim]+register_half_safe, min(u[idim,j], maxshift[idim]-register_half_safe))
+    end
+    u
+end
+
+"""
+`center, cov = principalaxes(img)` computes the principal axes of an
+image `img`.  `center` is the centroid of intensity, and `cov` the
+covariance matrix of the intensity.
+"""
+@generated function principalaxes{T,N}(img::AbstractArray{T,N})
+    quote
+        Ts = typeof(zero(T)/1)
+        psums = Vector{Ts}[zeros(Ts, size(img, d)) for d = 1:N]  # partial sums along all but one axis
+        # Use a two-pass algorithm
+        # First the partial sums, which we use to compute the centroid
+        @nloops $N I img begin
+            @inbounds v = @nref $N img I
+            if !isnan(v)
+                @inbounds (@nexprs $N d->(psums[d][I_d] += v))
+            end
+        end
+        s = sum(psums[1])
+        pmeans = Ts[sum(psums[d] .* (1:length(psums[d]))) for d = 1:N]
+        @nexprs $N d->(m_d = pmeans[d]/s)
+        # Now the variance
+        @nexprs $N j->(@nexprs $N i->(i >= j ? V_i_j = zero(Ts) : nothing))  # will hold intensity-weighted variance
+        @nloops $N I img begin
+            @inbounds v = @nref $N img I
+            if !isnan(v)
+                @nexprs $N j->(@nexprs $N i->(i > j ? V_i_j += v*(I_i-m_i)*(I_j-m_j) : nothing))
+            end
+        end
+        @nexprs $N d->(V_d_d = sum(psums[d] .* ((1:length(psums[d]))-m_d).^2))
+        @nexprs $N j->(@nexprs $N i->(i >= j ? V_i_j /= s : nothing))
+        # Package for output
+        center = Array(Ts, N)
+        cov = Array(Ts, N, N)
+        @nexprs $N d->(center[d] = m_d)
+        @nexprs $N j->(@nexprs $N i->(cov[i,j] = i >= j ? V_i_j : V_j_i))
+        center, cov
+    end
+end
+
+"""
+`tfms = pat_rotation(fixed, moving, [SD=eye])` computes the Principal
+Axes Transform aligning the low-order moments of two images. The
+reference image is `fixed`, and `moving` is the raw moving image that
+you wish to align to `fixed`.  `SD` is a "spacedimensions" matrix, in
+some cases needed to ensure that rotations in *physical* space
+correspond to orthogonal matrices in array-index units.  For example,
+if your axes are not uniformly sampled, `SD = diagm(voxelspacing)`.
+
+If you're aligning many images to `fixed`, you may alternatively call
+this as `tfms = pat_rotation(fixedpa, moving, [SD=eye])`.  `fixedpa`
+is a `(center,cov)` tuple obtained from `principalaxes(fixed)`.
+
+`tfms` is a list of potential AffineTransform candidates.  PA data,
+being based on ellipsoids, are ambiguous up to rotations by 180
+degrees (i.e., sign-flips of even numbers of coordinates).
+Consequently, you may need to check all of the candidates for the one
+that produces the best alignment.
+"""
+function pat_rotation(fixedmoments::Tuple{Vector,Matrix}, moving::AbstractArray, SD = eye(ndims(moving)))
+    nd = ndims(moving)
+    nd > 3 && error("Dimensions higher than 3 not supported") # list-generation doesn't yet generalize
+    fmean, fvar = fixedmoments
+    nd = length(fmean)
+    fvar = SD*fvar*SD'
+    fD, fV = eig(fvar)
+    mmean, mvar = principalaxes(moving)
+    mvar = SD*mvar*SD'
+    mD, mV = eig(mvar)
+    R = mV/fV
+    if det(R) < 0     # ensure it's a rotation
+        R[:,1] = -R[:,1]
+    end
+    c = ([size(moving)...].+1)/2
+    tfms = [pat_at(R, SD, c, fmean, mmean)]
+    for i = 1:nd
+        for j = i+1:nd
+            Rc = copy(R)
+            Rc[:,i] = -Rc[:,i]
+            Rc[:,j] = -Rc[:,j]
+            push!(tfms, pat_at(Rc, SD, c, fmean, mmean))
+        end
+    end
+#     # Debugging check
+#     @show fvar
+#     for i = 1:length(tfms)
+#         Sp = tfms[i].scalefwd
+#         S = SD*Sp/SD
+#         @show S
+#         @show R
+#         @show S'*mvar*S
+#     end
+    tfms
+end
+
+pat_rotation(fixed::AbstractArray, moving::AbstractArray, SD = eye(ndims(fixed))) =
+    pat_rotation(principalaxes(fixed), moving, SD)
+
+function pat_at(S, SD, c, fmean, mmean)
+    Sp = SD\(S*SD)
+    bp = (mmean-c) - Sp*(fmean-c)
+    AffineTransform(Sp, bp)
+end
+
+#### Low-level utilities
+
+function _calculate_u{N}(At, Xt, gridsize::NTuple{N})
+    Ut = Xt*At
+    u = Ut[:,1:size(Ut,2)-1]'                   # discard the dummy dimension
+    reinterpret(Vec{N, eltype(u)}, u, gridsize) # put u in the shape of the grid
+end
+
+function affinepenalty!{N}(g, At, mmis, keep, Xt, gridsize::NTuple{N}, gtmp)
+    u = _calculate_u(At, Xt, gridsize)
+    @assert eltype(u) == eltype(At)
+    val = penalty!(gtmp, u, mmis, keep)
+    @assert isa(val, eltype(At))
+    if !isempty(g)
+        T = eltype(eltype(gtmp))
+        nblocks = size(Xt,1)
+        At_mul_Bt!(g, Xt, [reinterpret(T,gtmp,(N,nblocks)); zeros(1,nblocks)])
+    end
+    val
+end
+
+function factoredaffine(alpha, D, V)
+    Anewm = real(V*Diagonal(D.^alpha)/V)
+    AffineTransform(Anewm[1:end-1,1:end-1], Anewm[1:end-1,end])
+end
+
+function factoredaffinepenalty(penalty, alpha, Aold, D, V)
+    Anew = factoredaffine(alpha, D, V)
+    A = Anew*Aold
+    ret = penalty(A)
+    @show alpha, ret
+    ret
+end
+
+function p2rigid(p, SD)
+    if length(p) == 1
+        return AffineTransform([1], p)  # 1 dimension
+    elseif length(p) == 3
+        return AffineTransform(SD\(rotation2(p[1])*SD), p[2:end])    # 2 dimensions
+    elseif length(p) == 6
+        return AffineTransform(SD\(rotation3(p[1:3])*SD), p[4:end])  # 3 dimensions
+    else
+        error("Dimensionality not supported")
+    end
+end
+
+@generated function qfit_core!{T,N}(dE::Array{T,2}, V4::Array{T,2}, C::Array{T,4}, mm::Array{NumDenom{T},N}, thresh, umin::NTuple{N,Int}, E0)
+    # The cost of generic matrix-multiplies is too high, so we write
+    # these out by hand.
+    quote
+        @nexprs $N i->(@nexprs $N j->j<i?nothing:(dE_i_j = zero(T); V4_i_j = 0))
+        @nexprs $N d->(umin_d = umin[d])
+        @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 = zero(T)))))
+        @nloops $N i mm begin
+            nd = @nref $N mm i
+            num, den = nd.num, nd.denom
+            if den > thresh
+                @nexprs $N d->(v_d = i_d - umin_d)
+                v2 = 0
+                @nexprs $N d->(v2 += v_d*v_d)
+                r = num/den
+                dE0 = r-E0
+                @nexprs $N j->(@nexprs $N k->k<j?nothing:(dE_j_k += dE0*v_j*v_k; V4_j_k += v2*v_j*v_k))
+                @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 += v_iter1*v_iter2*v_iter3*v_iter4))))
+            end
+        end
+        @nexprs $N i->(@nexprs $N j->j<i?(dE[i,j] = dE_j_i; V4[i,j] = V4_j_i):(dE[i,j] = dE_i_j; V4[i,j] = V4_i_j))
+        @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C[iter1,iter2,iter3,iter4] = C_iter1_iter2_iter3_iter4))))
+        sortindex = Array(Int, 4)
+        for iter1 = 1:$N, iter2 = 1:$N, iter3 = 1:$N, iter4 = 1:$N
+            sortindex[1] = iter1
+            sortindex[2] = iter2
+            sortindex[3] = iter3
+            sortindex[4] = iter4
+            sort!(sortindex)
+            C[iter1,iter2,iter3,iter4] = C[sortindex[1],sortindex[2],sortindex[3],sortindex[4]]
+        end
+        dE, V4, C
+    end
+end
+
+"""
+`E0, u0, Q = qfit(mm, thresh)` performs a quadratic fit of the
+mismatch data in `mm`.  On output, `u0` and `E0` hold the position and
+value, respectively, of the shift with smallest mismatch, and `Q` is a
+matrix representing the best fit to a model
+```
+    mm ≈ E0 + (u-u0)'*Q*(u-u0)
+```
+Only those shift-locations with `mm[i].denom > thresh` are used in
+performing the fit.
+"""
+function qfit(mm::MismatchArray, thresh::Real)
+    T = eltype(eltype(mm))
+    threshT = convert(T, thresh)
+    d = ndims(mm)
+    mxs = maxshift(mm)
+    E0 = typemax(T)
+    imin = 0
+    for (i, nd) in enumerate(mm)
+        if nd.denom > thresh
+            r = nd.num/nd.denom
+            if r < E0
+                imin = i
+                E0 = r
+            end
+        end
+    end
+    if imin == 0
+        return zero(T), zeros(T, d), zeros(T, d, d)  # no valid values
+    end
+    umin = ind2sub(size(mm), imin)  # not yet relative to center
+    uout = T[umin...]
+    for i = 1:d
+        uout[i] -= size(mm,i)>>1 + 1
+    end
+    dE = Array(T, d, d)
+    V4 = similar(dE)
+    C = zeros(T, d, d, d, d)
+    qfit_core!(dE, V4, C, mm.data, thresh, umin, E0)
+    if all(dE .== 0) || any(diag(V4) .== 0)
+        return E0, uout, zeros(eltype(dE), d, d)
+    end
+    # Initial guess for Q
+    M = real(sqrtm(V4))
+    # Compute M\dE/M carefully:
+    U, s, V = svd(M)
+    s1 = s[1]
+    sinv = T[v < sqrt(eps(T))*s1 ? zero(T) : 1/v for v in s]
+    Minv = V*scale(sinv, U')
+    Q = Minv*dE*Minv
+    local QL
+    try
+        QL = full(chol(Q, Val{:L}))
+    catch err
+        if isa(err, LinAlg.PosDefException)
+            warn("Fixing positive-definite exception:")
+            @show V4 dE M Q
+            QL = full(chol(Q+0.001*mean(diag(Q))*I, Val{:L}))
+        else
+            rethrow(err)
+        end
+    end
+
+    # Optimize QL
+    x = zeros(T, (d*(d+1))>>1)
+    indx = 0
+    for i = 1:d,j=1:d
+        if i>=j
+            x[indx+=1] = QL[i,j]
+        end
+    end
+    results = nlsolve((x,fx)->QLerr!(x, fx, C, dE, similar(QL)), (x,gx)->QLjac!(x, gx, C, similar(QL)), x)
+    unpackL!(QL, results.zero)
+    E0, uout, QL'*QL
+end
+
+function unpackL!(QL, x)
+    d = size(QL, 1)
+    indx = 0
+    for i = 1:d,j=1:d
+        if i>=j
+            QL[i,j] = x[indx+=1]
+        end
+    end
+    QL
+end
+
+function QLerr!(x, fx, C, dE, L)
+    d = size(L,1)
+    fill!(L, 0)
+    unpackL!(L, x)
+    indx = 0
+    T = typeof(C[1,1,1,1]*L[1,1] + C[1,1,1,1]*L[1,1])
+    for i = 1:d, j=1:d
+        if i >= j
+            tmp = zero(T)
+            for l=1:d,m=1:d,n=1:d
+                tmp += L[l,m]*L[l,n]*C[i,j,m,n]
+            end
+            fx[indx+=1] = tmp - dE[i,j]
+        end
+    end
+end
+
+function QLjac!(x, gx, C, L)
+    d = size(L,1)
+    fill!(L, 0)
+    unpackL!(L, x)
+    T = typeof(C[1,1,1,1]*L[1,1] + C[1,1,1,1]*L[1,1])
+    indx1 = 0
+    for i=1:d, j=1:d
+        if i >= j
+            indx1 += 1
+            indx2 = 0
+            for a=1:d, b=1:d
+                if a >= b
+                    tmp = zero(T)
+                    for k = 1:d
+                        tmp += (C[i,j,b,k]+C[i,j,k,b])*L[a,k]
+                    end
+                    gx[indx1, indx2+=1] = tmp
+                end
+            end
+        end
+    end
+end
+
+end
