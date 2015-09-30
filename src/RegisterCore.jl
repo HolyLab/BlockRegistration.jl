@@ -189,6 +189,7 @@ immutable NumDenom{T<:Number}
     num::T
     denom::T
 end
+NumDenom(n, d) = NumDenom(promote(n, d)...)
 
 (+)(p1::NumDenom, p2::NumDenom) = NumDenom(p1.num+p2.num, p1.denom+p2.denom)
 (-)(p1::NumDenom, p2::NumDenom) = NumDenom(p1.num-p2.num, p1.denom-p2.denom)
@@ -315,17 +316,18 @@ end
 `r = ratio(mm, thresh, [fillval])` returns an array with the ratio
 `num/denom` at each location. `fillval` is used everywhere where
 `denom < thresh`, and `fillval`'s type determines the type of the
-output. The default is NaN32.
+output. The default is NaN.
 """
 function ratio{T}(mm::MismatchArray, thresh, fillval::T)
     out = CenterIndexedArray(T, size(mm))
     for I in eachindex(mm)
         nd = mm[I]
-        out[I] = nd.denom < thresh ? fillval : nd.num/nd.denom
+        out[I] = ratio(nd, thresh, fillval)
     end
     out
 end
-ratio(mm::MismatchArray, thresh) = ratio(mm, thresh, NaN32)
+ratio(mm::MismatchArray, thresh) = ratio(mm, thresh, convert(eltype(eltype(mm)), NaN))
+@inline ratio{T}(nd::NumDenom{T}, thresh, fillval=convert(T,NaN)) = nd.denom < thresh ? fillval : nd.num/nd.denom
 
 Base.call{M<:MismatchArray,T}(::Type{M}, ::Type{T}, dims) = CenterIndexedArray(NumDenom{T}, dims)
 Base.call{M<:MismatchArray,T}(::Type{M}, ::Type{T}, dims...) = CenterIndexedArray(NumDenom{T}, dims)
