@@ -161,6 +161,11 @@ function displaymismatch(mms; thresh = 0, totaldenom::Bool = false, clim=:auto, 
     end
     nothing
 end
+function displaymismatch(mm::MismatchArray; kwargs...)
+    mms = Array(Any, ones(Int, ndims(mm))...)
+    mms[] = mm
+    displaymismatch(mms, kwargs...)
+end
 
 # getyx{T<:FloatingPoint}(u::Array{T}, i, center) = u[1,i]+center[1], u[2,i]+center[2]
 # getyx(u, i, center) = u[i] + center
