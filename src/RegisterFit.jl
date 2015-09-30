@@ -206,7 +206,7 @@ function optimize(tform::AffineTransform, mmis, knots)
 end
 
 """
-`tform = optimize_rigid(penalty, tform0, [SD = eye])` optimizes a
+`tform, val = optimize_rigid(penalty, tform0, [SD = eye])` optimizes a
 rigid transformation (rotation + shift) to minimize `penalty`, a
 function mapping an affine transformation to a real value. For
 example:
@@ -214,7 +214,8 @@ example:
 ```
     penalty = tform -> mismatch0(fixed, transform(moving, tform))
 ```
-would result in the minimim mismatch between `fixed` and `moving`.
+would result in the minimum mismatch between `fixed` and `moving`.
+`val` is the value of `penalty` at the minimum.
 
 `tform0` is an initial guess.  Use `SD` if your axes are not uniformly
 sampled, for example `SD = diagm(voxelspacing)` where `voxelspacing`
