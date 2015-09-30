@@ -163,6 +163,12 @@ maxshift = (3,11)
 B = outer[3:12,1:8]
 @test RM.register_translate(A, B, maxshift) == CartesianIndex((-2,1))
 
+# Mismatched types
+A = rand(Float32, 5, 5)
+B = rand(5, 5)
+mm = RegisterMismatch.mismatch0(A, B)
+@test eltype(mm) == Float64
+
 if havecuda
     RegisterMismatchCuda.close()
     CUDArt.close!(mdutils, devlist)

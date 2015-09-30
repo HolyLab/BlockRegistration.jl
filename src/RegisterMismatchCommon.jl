@@ -32,9 +32,9 @@ nanval{T}(::Type{T}) = convert(Float32, NaN)
 "as-is" mismatch between `fixed` and `moving`, without any shift.
 `normalization` may be either `:intensity` (the default) or `:pixels`.
 """
-function mismatch0{T,N}(fixed::AbstractArray{T,N}, moving::AbstractArray{T,N}; normalization = :intensity)
+function mismatch0{Tf,Tm,N}(fixed::AbstractArray{Tf,N}, moving::AbstractArray{Tm,N}; normalization = :intensity)
     size(fixed) == size(moving) || throw(DimensionMismatch("Size $(size(fixed)) of fixed is not equal to size $(size(moving)) of moving"))
-    num = denom = zero(mmtype(T))
+    num = denom = zero(mmtype(promote_type(Tf,Tm)))
     if normalization == :intensity
         for i in eachindex(fixed, moving)
             vf = fixed[i]
