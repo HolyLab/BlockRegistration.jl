@@ -5,5 +5,6 @@ FixedSizeArrays
 NLsolve
 MathProgBase
 Ipopt
+IterativeSolvers
 CUDArt
 CUFFT

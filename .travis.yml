@@ -1,13 +1,16 @@
 # Documentation: http://docs.travis-ci.com/user/languages/julia/
 language: julia
+sudo: true
 os:
   - linux
 julia:
   - 0.4
 notifications:
   email: false
+before_install:
+  - sudo apt-get install build-essential gfortran pkg-config
 script:
   - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
-  - julia -e 'Pkg.clone(pwd()); Pkg.clone("git@github.com:HolyLab/RFFT.jl.git"); Pkg.checkout("FixedSizeArrays")'
+  - julia -e 'Pkg.clone(pwd()); Pkg.clone("git@github.com:HolyLab/RFFT.jl.git"); Pkg.checkout("FixedSizeArrays"); Pkg.checkout("AffineTransforms")'
   - julia -e 'Pkg.build("BlockRegistration"); Pkg.test("BlockRegistration")'
 #   - julia --check-bounds=yes -e 'using BlockRegistration; pth = LOAD_PATH[end]; include(joinpath(splitdir(pth)[1], "test", "runtests.jl"))'
