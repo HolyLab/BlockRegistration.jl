@@ -15,3 +15,4 @@ end
 runtest("register_mismatch.jl")
 runtest("register_fit.jl")
 runtest("register_penalty.jl")
+runtest("register_optimize.jl")

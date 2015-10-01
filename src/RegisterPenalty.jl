@@ -218,7 +218,7 @@ NTuple of knot-vectors; otherwise, it should be an
 `ndims`-by-`npoints` matrix that stores the knot locations in columns.
 """
 type AffinePenalty{T} <: DeformationPenalty{T}
-    Q::Matrix{T}   # geometry data for the affine-residual penalty
+    F::Matrix{T}   # geometry data for the affine-residual penalty
     λ::T           # regularization coefficient
 
     function AffinePenalty{N}(knots::NTuple{N}, λ)
@@ -231,14 +231,14 @@ type AffinePenalty{T} <: DeformationPenalty{T}
                 C[i, j] = knots[j][I[j]]  # I[j]
             end
         end
-        Q, _ = qr(C)
-        new(Q, λ)
+        F, _ = qr(C)
+        new(F, λ)
     end
 
     function AffinePenalty(knots::AbstractMatrix, λ)
         C = hcat(knots', ones(eltype(knots), size(knots, 2)))
-        Q, _ = qr(C)
-        new(Q, λ)
+        F, _ = qr(C)
+        new(F, λ)
     end
 end
 
@@ -263,16 +263,20 @@ will be computed.  If you write a custom `penalty!` function for a new
 `DeformationPenalty`, it is your responsibility to set `g` in-place.
 """
 function penalty!{T,N}(g, dp::AffinePenalty, ϕ_c::AbstractDeformation{T,N})
-    Q, λ = dp.Q, dp.λ
+    penalty!(g, dp, ϕ_c.u)
+end
+
+function penalty!{T,N}(g, dp::AffinePenalty, u::AbstractArray{Vec{N,T},N})
+    F, λ = dp.F, dp.λ
     if λ == 0
         if g != nothing && !isempty(g)
             fill!(g, zero(eltype(g)))
         end
-        return λ * one(eltype(Q)) * one(T)
+        return λ * one(eltype(F)) * one(T)
     end
-    n = length(ϕ_c.u)
-    U = reinterpret(T, ϕ_c.u, (N, n))
-    A = (U*Q)*Q'   # projection onto an affine transformation
+    n = length(u)
+    U = reinterpret(T, u, (N, n))
+    A = (U*F)*F'   # projection onto an affine transformation
     dU = U-A
     λ /= n
     if g != nothing && !isempty(g)

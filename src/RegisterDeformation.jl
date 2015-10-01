@@ -13,8 +13,8 @@ export
     WarpedArray,
     # functions
     arraysize,
-    eachknot,
     compose,
+    eachknot,
     tform2deformation,
     translate,
     vecindex,

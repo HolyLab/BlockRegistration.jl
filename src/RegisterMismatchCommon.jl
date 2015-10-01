@@ -7,8 +7,6 @@ export nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_siz
 typealias DimsLike Union{AbstractVector{Int}, Dims}
 typealias WidthLike Union{AbstractVector,Tuple}
 
-mmtype(T) = typeof((one(T)+one(T))/1)
-
 """
 `fixedpad, movingpad = nanpad(fixed, moving)` will pad `fixed` and/or
 `moving` with NaN as needed to ensure that `fixedpad` and `movingpad`
@@ -34,7 +32,7 @@ nanval{T}(::Type{T}) = convert(Float32, NaN)
 """
 function mismatch0{Tf,Tm,N}(fixed::AbstractArray{Tf,N}, moving::AbstractArray{Tm,N}; normalization = :intensity)
     size(fixed) == size(moving) || throw(DimensionMismatch("Size $(size(fixed)) of fixed is not equal to size $(size(moving)) of moving"))
-    num = denom = zero(mmtype(promote_type(Tf,Tm)))
+    num = denom = zero(promote_type(typeof((one(Tf) - one(Tm))^2), typeof(one(Tf)^2+one(Tm)^2)))
     if normalization == :intensity
         for i in eachindex(fixed, moving)
             vf = fixed[i]

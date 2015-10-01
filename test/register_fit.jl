@@ -2,23 +2,9 @@ import RegisterFit
 using Base.Test, AffineTransforms, Interpolations
 using RegisterCore
 
+include("register_test_utilities.jl")
+
 ### qfit
-
-function quadratic(m, n, cntr, Q)
-    A = zeros(m, n)
-    c = block_center(m, n)
-    cntr = [cntr[1]+c[1], cntr[2]+c[2]]
-    u = zeros(2)
-    for j = 1:n, i = 1:m
-        u[1], u[2] = i-cntr[1], j-cntr[2]
-        A[i,j] = dot(u,Q*u)
-    end
-    A
-end
-
-function block_center(sz...)
-    ntuple(i->sz[i]>>1+1, length(sz))
-end
 
 denom = ones(11,11)
 Q = rand(2,2); Q = Q'*Q
