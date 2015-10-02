@@ -1,11 +1,66 @@
 # Note: not a module, included into RegisterMismatch or RegisterMismatchCuda
 
-using RegisterCore
+using RegisterCore, CenterIndexedArrays
 
-export nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_size, highpass, truncatenoise!
+export correctbias!, nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_size, highpass, truncatenoise!
 
 typealias DimsLike Union{AbstractVector{Int}, Dims}
 typealias WidthLike Union{AbstractVector,Tuple}
+
+mismatch{T<:AbstractFloat}(fixed::AbstractArray{T}, moving::AbstractArray{T}, maxshift::DimsLike; normalization = :intensity) = mismatch(T, fixed, moving, maxshift; normalization=normalization)
+mismatch(fixed::AbstractArray, moving::AbstractArray, maxshift::DimsLike; normalization = :intensity) = mismatch(Float32, fixed, moving, maxshift; normalization=normalization)
+
+mismatch_apertures{T<:AbstractFloat}(fixed::AbstractArray{T}, moving::AbstractArray{T}, args...; kwargs...) = mismatch_apertures(T, fixed, moving, args...; kwargs...)
+mismatch_apertures(fixed::AbstractArray, moving::AbstractArray, args...; kwargs...) = mismatch_apertures(Float32, fixed, moving, args...; kwargs...)
+
+function mismatch_apertures{T}(::Type{T}, fixed::AbstractArray, moving::AbstractArray, gridsize::DimsLike, maxshift::DimsLike; kwargs...)
+    cs = coords_spatial(fixed)
+    aperture_centers = aperture_grid(size(fixed)[cs], gridsize)
+    aperture_width = default_aperture_width(fixed, gridsize)
+    mismatch_apertures(T, fixed, moving, aperture_centers, aperture_width, maxshift; kwargs...)
+end
+
+"""
+`mmc = correctbias!(mm::MismatchArray)` replaces "suspect" mismatch
+data with imputed data.  If each pixel in your camera has a different
+bias, then matching that bias becomes an incentive to avoid
+shifts.  Likewise, CMOS cameras tend to have correlated row/column
+noise. These two factors combine to imply that `mm[i,j]` is unreliable
+whenever `i` or `j` is zero.
+
+Data are imputed by averaging the adjacent non-suspect values.
+"""
+function correctbias!{ND,N}(mm::MismatchArray{ND,N})
+    T = eltype(ND)
+    w = CenterIndexedArray(ones(T, size(mm)))
+    for I in eachindex(mm)
+        anyzero = false
+        for d = 1:N
+            anyzero |= I[d] == 0
+        end
+        if anyzero
+            w[I] = 0
+            mm[I] = NumDenom{T}(0,0)
+        end
+    end
+    mmd = copy(mm.data)  # make a copy so updates don't affect later operations
+    wd = w.data
+    I1 = CartesianIndex(ntuple(d->1, N)::NTuple{N,Int})
+    Iend = CartesianIndex(ntuple(d->size(mm,d), N)::NTuple{N,Int})
+    for I in CartesianRange(size(mmd))
+        if wd[I] == 0
+            mms = NumDenom{T}(0,0)
+            ws = zero(T)
+            CR = CartesianRange(max(I1, I-I1), min(Iend, I+I1))
+            for J in CR
+                mms += mmd[J]
+                ws += wd[J]
+            end
+            mm.data[I] = mms/ws
+        end
+    end
+    mm
+end
 
 """
 `fixedpad, movingpad = nanpad(fixed, moving)` will pad `fixed` and/or

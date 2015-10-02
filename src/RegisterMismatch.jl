@@ -8,8 +8,6 @@ using Images
 using RFFT
 using RegisterCore
 
-include("RegisterMismatchCommon.jl")
-
 export
     CMStorage,
     fillfixed!,
@@ -17,6 +15,8 @@ export
     mismatch!,
     mismatch_apertures,
     mismatch_apertures!
+
+include("RegisterMismatchCommon.jl")
 
 """
 The major types and functions exported are:
@@ -26,6 +26,7 @@ The major types and functions exported are:
 - `mismatch0`: simple direct mismatch calculation with no shift
 - `nanpad`: pad the smaller image with NaNs
 - `highpass`: highpass filter an image
+- `correctbias!`: replace corrupted mismatch data (due to camera bias inhomogeneity) with imputed data
 - `truncatenoise!`: threshold mismatch computation to prevent problems from roundoff
 - `aperture_grid`: create a regular grid of apertures
 - `allocate_mmarrays`: create storage for output of `mismatch_apertures!`
@@ -120,8 +121,6 @@ function mismatch{T<:Real}(::Type{T}, fixed::AbstractArray, moving::AbstractArra
     mismatch!(mm, cms, moving, normalization=normalization)
     return mm
 end
-mismatch{T<:AbstractFloat}(fixed::AbstractArray{T}, moving::AbstractArray{T}, maxshift::DimsLike; normalization = :intensity) = mismatch(T, fixed, moving, maxshift; normalization=normalization)
-mismatch(fixed::AbstractArray, moving::AbstractArray, maxshift::DimsLike; normalization = :intensity) = mismatch(Float32, fixed, moving, maxshift; normalization=normalization)
 
 """
 `mismatch!(mm, cms, moving; [normalization=:intensity])`
@@ -167,16 +166,16 @@ function mismatch!(mm::MismatchArray, cms::CMStorage, moving::AbstractArray; nor
 end
 
 """
-`mms = mismatch_apertures([T], fixed, moving, aperture_centers,
-aperture_width, maxshift; [normalization=:intensity], [flags=FFTW.MEASURE],
-kwargs...)` computes the mismatch between `fixed` and `moving` over a
-list of apertures of size `aperture_width` at positions defined by
-`aperture_centers`.  The maximum-allowed shift in any aperture is
-`maxshift`.
-
 `mms = mismatch_apertures([T], fixed, moving, gridsize, maxshift;
-kwargs...)` performs the same calculation using a regularly-spaced
-grid of aperture centers.
+[normalization=:intensity], [flags=FFTW.MEASURE], kwargs...)` computes
+the mismatch between `fixed` and `moving` over a regularly-spaced grid
+of aperture centers, effectively breaking the images up into
+chunks. The maximum-allowed shift in any aperture is `maxshift`.
+
+`mms = mismatch_apertures([T], fixed, moving, aperture_centers,
+aperture_width, maxshift; kwargs...)` computes the mismatch between
+`fixed` and `moving` over a list of apertures of size `aperture_width`
+at positions defined by `aperture_centers`.
 
 `fixed` and `moving` must have the same size; you can pad with `NaN`s
 as needed to ensure this.  You can optionally specify the real-valued
@@ -206,16 +205,6 @@ function mismatch_apertures{T}(::Type{T},
     mms = allocate_mmarrays(T, aperture_centers, maxshift)
     cms = CMStorage(T, aperture_width, maxshift; flags=flags, kwargs...)
     mismatch_apertures!(mms, fixed, moving, aperture_centers, cms, normalization=normalization)
-    mms
-end
-mismatch_apertures{T<:AbstractFloat}(fixed::AbstractArray{T}, moving::AbstractArray{T}, args...; kwargs...) = mismatch_apertures(T, fixed, moving, args...; kwargs...)
-mismatch_apertures(fixed::AbstractArray, moving::AbstractArray, args...; kwargs...) = mismatch_apertures(Float32, fixed, moving, args...; kwargs...)
-
-function mismatch_apertures{T}(::Type{T}, fixed::AbstractArray, moving::AbstractArray, gridsize::DimsLike, maxshift::DimsLike; kwargs...)
-    cs = coords_spatial(fixed)
-    aperture_centers = aperture_grid(size(fixed)[cs], gridsize)
-    aperture_width = default_aperture_width(fixed, gridsize)
-    mismatch_apertures(T, fixed, moving, aperture_centers, aperture_width, maxshift; kwargs...)
 end
 
 """

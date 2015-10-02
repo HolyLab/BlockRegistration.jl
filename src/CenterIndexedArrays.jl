@@ -8,7 +8,7 @@ using Images
 
 import Base: size, eachindex, getindex, setindex!, linearindexing
 import Base: ==, +, -, *, /, .+, .-, .*, ./, .\, .%, .<<, .>>, &, |, $
-import Base: isequal, maximum, minimum, cumsum, permutedims, ipermutedims
+import Base: copy, isequal, maximum, minimum, cumsum, permutedims, ipermutedims
 import Base: mapslices, flipdim
 import Base: show, showcompact, writemime
 using Base.Cartesian
@@ -84,6 +84,8 @@ end
 isequal(A::CenterIndexedArray, B::CenterIndexedArray) = isequal(A.data, B.data)
 isequal(A::CenterIndexedArray, B::AbstractArray) = isequal(A.data, B)
 isequal(A::AbstractArray, B::CenterIndexedArray) = isequal(A, B.data)
+
+copy(A::CenterIndexedArray) = CenterIndexedArray(copy(A.data))
 
 maximum(A::CenterIndexedArray, region) = maximum(A.data, region)
 minimum(A::CenterIndexedArray, region) = minimum(A.data, region)
