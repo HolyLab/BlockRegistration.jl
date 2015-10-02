@@ -1,9 +1,7 @@
 module RegisterGUI
 
 using Images, ImagePlayer, Gtk, Colors, Graphics
-using RegisterCore
-
-import RegisterMismatch
+using RegisterCore, CenterIndexedArrays
 
 # export selectbb3, showoverlay, displayblocks, displaymismatch
 export showoverlay, displaymismatch
@@ -135,10 +133,6 @@ function displaymismatch(mms; thresh = 0, totaldenom::Bool = false, clim=:auto, 
     end
     for j = 1:gridsize[2], i = 1:gridsize[1]
         r = ratio(mms[i,j], thresh)
-        # num, denom = RegisterMismatch.separate(mm)
-        # denom = totaldenom ? D : denom
-        # r = num./denom
-        # r[denom .< thresh] = NaN
         if clim == :auto
             cl = (0,maxfinite(r))
         else
@@ -161,8 +155,8 @@ function displaymismatch(mms; thresh = 0, totaldenom::Bool = false, clim=:auto, 
     end
     nothing
 end
-function displaymismatch(mm::MismatchArray; kwargs...)
-    mms = Array(Any, ones(Int, ndims(mm))...)
+function displaymismatch(mm::CenterIndexedArray; kwargs...)
+    mms = Array(Any, 1, 1)
     mms[] = mm
     displaymismatch(mms, kwargs...)
 end
