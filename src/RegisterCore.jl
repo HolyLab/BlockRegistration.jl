@@ -200,6 +200,8 @@ Base.one{T}(::Type{NumDenom{T}}) = NumDenom(one(T),one(T))
 Base.zero{T}(::Type{NumDenom{T}}) = NumDenom(zero(T),zero(T))
 Base.promote_rule{T1,T2<:Number}(::Type{NumDenom{T1}}, ::Type{T2}) = NumDenom{promote_type(T1,T2)}
 Base.eltype{T}(::Type{NumDenom{T}}) = T
+Base.convert{T}(::Type{NumDenom{T}}, p::NumDenom{T}) = p
+Base.convert{T}(::Type{NumDenom{T}}, p::NumDenom) = NumDenom{T}(p.num, p.denom)
 Base.show(io::IO, p::NumDenom) = print(io, "NumDenom(", p.num, ",", p.denom, ")")
 function Base.showcompact(io::IO, p::NumDenom)
     print(io, "NumDenom(")
@@ -328,6 +330,8 @@ function ratio{T}(mm::MismatchArray, thresh, fillval::T)
 end
 ratio(mm::MismatchArray, thresh) = ratio(mm, thresh, convert(eltype(eltype(mm)), NaN))
 @inline ratio{T}(nd::NumDenom{T}, thresh, fillval=convert(T,NaN)) = nd.denom < thresh ? fillval : nd.num/nd.denom
+
+ratio{T<:Real}(r::CenterIndexedArray{T}, thresh, fillval=convert(T,NaN)) = r
 
 Base.call{M<:MismatchArray,T}(::Type{M}, ::Type{T}, dims) = CenterIndexedArray(NumDenom{T}, dims)
 Base.call{M<:MismatchArray,T}(::Type{M}, ::Type{T}, dims...) = CenterIndexedArray(NumDenom{T}, dims)

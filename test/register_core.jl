@@ -4,9 +4,16 @@ using Base.Test
 nd = RegisterCore.NumDenom(3.5,10)
 @test RegisterCore.ratio(nd, 5) == 3.5/10
 @test isequal(RegisterCore.ratio(nd, 20), NaN)
+@test convert(RegisterCore.NumDenom{Float32}, nd) == RegisterCore.NumDenom(3.5f0,10)
 nd = RegisterCore.NumDenom(3.5f0,10)
 @test isa(RegisterCore.ratio(nd, 5), Float32)
 @test isa(RegisterCore.ratio(nd, 20), Float32)
+
+num, denom = rand(3,3), rand(3,3)+0.5
+mm = RegisterCore.MismatchArray(num, denom)
+r = num./denom
+@test RegisterCore.ratio(mm, 0.25) == r
+@test RegisterCore.ratio(r, 0.25) == r
 
 # Finding the location of the minimum
 num = [5,4,3,4.5,7].*[2,1,1.5,2,3]'
