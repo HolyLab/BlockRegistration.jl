@@ -36,24 +36,18 @@ CUDArt.devices(dev->CUDArt.capability(dev)[1] >= 2, nmax=1) do devlist
         B = zeros(5,5)
         B[4,5] = 3
         maxshift = (2,3)
-        num, denom = RegisterMismatchCuda.mismatch(A, A, maxshift)
-        RegisterMismatchCuda.truncatenoise!(num, denom, 1e-3*maximum(denom))
-        r = num./denom
-        @test indmin(r) == (2*maxshift[1]+1)*maxshift[2] + maxshift[1]+1
-        num, denom = RegisterMismatchCuda.mismatch(A, B, maxshift)
-        RegisterMismatchCuda.truncatenoise!(num, denom, 1e-3*maximum(denom))
-        r = num./denom
-        @test indmin(r) == (2*maxshift[1]+1)*(maxshift[2]+2) + maxshift[1]+1+1
+        mm = RegisterMismatchCuda.mismatch(A, A, maxshift)
+        num, denom = RegisterMismatchCuda.separate(mm)
+        RegisterMismatchCuda.truncatenoise!(mm, 0.01)
+        @test indmin_mismatch(mm, 0.01) == CartesianIndex((0,0))
+        mm = RegisterMismatchCuda.mismatch(A, B, maxshift)
+        RegisterMismatchCuda.truncatenoise!(mm, 0.01)
+        @test indmin_mismatch(mm, 0.01) == CartesianIndex((1,2))
 
         # Testing on more complex objects
         maxshift = (20, 20)
-        num, denom = RegisterMismatchCuda.mismatch(fixed, moving, maxshift)
-        imin = indmin(num./denom)
-        x,y = ind2sub((2*maxshift[1]+1,2*maxshift[2]+1), imin)
-        x -= maxshift[1]+1
-        y -= maxshift[2]+1
-        @test x == -13
-        @test y == 8
+        mm = RegisterMismatchCuda.mismatch(fixed, moving, maxshift)
+        @test indmin_mismatch(mm, 0.01) == CartesianIndex((-13,8))
     finally
         RegisterMismatchCuda.close()
     end
