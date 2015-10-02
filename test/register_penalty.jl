@@ -13,10 +13,10 @@ dp = RegisterPenalty.AffinePenalty(knots, 1.0)
 ϕ_new = tform2deformation(tformtranslate([0.3,0.05]), imgsize, gridsize)
 ϕ_old = interpolate(tform2deformation(tformtranslate([0.1,0.2]),  imgsize, gridsize))
 g = similar(ϕ_new.u)
-@test abs(RP.penalty!(g, dp, ϕ_new)) < 1e-12
+@test @inferred(abs(RP.penalty!(g, dp, ϕ_new))) < 1e-12
 @test all(x->sum(abs(x)) < 1e-12, g)
 ϕ_c, g_c = compose(ϕ_old, ϕ_new)
-@test abs(RP.penalty!(g, dp, ϕ_c, g_c)) < 1e-12
+@test @inferred(abs(RP.penalty!(g, dp, ϕ_c, g_c))) < 1e-12
 @test all(x->sum(abs(x)) < 1e-12, g)
 
 # Zero penalty for rotations
@@ -38,7 +38,7 @@ dp = RegisterPenalty.AffinePenalty(knots, 1.0)
 u = randn(2, gridsize...)
 ϕ = GridDeformation(u, imgsize)
 g = similar(ϕ.u)
-RP.penalty!(g, dp, ϕ)
+@inferred(RP.penalty!(g, dp, ϕ))
 for i = 1:prod(gridsize)
     for j = 1:2
         ud = dual(u)
@@ -80,7 +80,7 @@ mmi_array = typeof(mmi)[mmi]
 ϕ = GridDeformation(zeros(2, 1, 1), imgsize)
 g = similar(ϕ.u)
 fill!(g, 0)
-val = RP.penalty!(g, ϕ, mmi_array)
+val = @inferred(RP.penalty!(g, ϕ, mmi_array))
 @test_approx_eq val (4-1.75)^4
 @test_approx_eq g[1][1] 2*(4-1.75)^3
 # Test at the minimum
@@ -113,7 +113,7 @@ u_real = (dr.*rand(2, gridsize...).+minrange) .- Float64[m+1 for m in maxshift] 
 ϕ = GridDeformation(u_real, imgsize)
 g = similar(ϕ.u)
 fill!(g, 0)
-val = RP.penalty!(g, ϕ, mmis)
+val = @inferred(RP.penalty!(g, ϕ, mmis))
 nblocks = prod(gridsize)
 valpred = sum([prod([(maxshift[k]+1+u_real[k,i,j]-c[k,i,j])^2 for k = 1:2]) for i=1:gridsize[1],j=1:gridsize[2]])/nblocks
 @test_approx_eq val valpred

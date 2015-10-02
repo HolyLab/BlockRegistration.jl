@@ -159,7 +159,8 @@ function penalty_nd!(gnd, u::AbstractArray, mmis, keep)
     if calc_grad
         gtmp = Array(NumDenom{T}, N)
     end
-    for (iblock,mmi) in enumerate(mmis)
+    for iblock = 1:length(mmis)
+        mmi = mmis[iblock]
         if !keep[iblock]
             if calc_grad
                 gnd[iblock] = NumDenom{T}(0,0)
@@ -169,7 +170,7 @@ function penalty_nd!(gnd, u::AbstractArray, mmis, keep)
         # Check bounds
         dx = u[iblock]
         if !checkbounds_shift(dx, mxs)
-            return (nanT,nanT)
+            return NumDenom{T}(nanT,nanT)
         end
         # Evaluate the value
         nd += vecindex(mmi, dx)
