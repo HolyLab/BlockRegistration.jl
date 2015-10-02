@@ -2,7 +2,8 @@
 
 module RegisterFit
 
-using NLsolve, RegisterPenalty, RegisterCore, AffineTransforms, Interpolations, FixedSizeArrays
+using AffineTransforms, Interpolations, FixedSizeArrays, NLsolve
+using RegisterPenalty, RegisterCore, CenterIndexedArrays
 
 import Base: @nloops, @nexprs, @nref
 
@@ -164,12 +165,12 @@ ratio given the quadratic form parameters `E0, u0, Q` obtained from
 function qbuild(E0::Real, umin::Vector, Q::Matrix, maxshift)
     d = length(maxshift)
     (size(Q,1) == d && size(Q,2) == d && length(umin) == d) || error("Size mismatch")
-    szoutv = 2*[maxshift...]+1
-    out = zeros(eltype(Q), tuple(szoutv...))
+    szout = ((2*[maxshift...]+1)...)
+    out = zeros(eltype(Q), szout)
     j = 1
     du = similar(umin)
-    Qdu = similar(umin)
-    for c in Counter(szoutv)
+    Qdu = similar(umin, typeof(one(eltype(Q))*one(eltype(du))))
+    for c in CartesianRange(szout)
         for idim = 1:d
             du[idim] = c[idim] - maxshift[idim] - 1 - umin[idim]
         end
@@ -177,7 +178,7 @@ function qbuild(E0::Real, umin::Vector, Q::Matrix, maxshift)
         out[j] = E0 + uQu
         j += 1
     end
-    out
+    CenterIndexedArray(out)
 end
 
 """

@@ -57,6 +57,12 @@ num = copy(num0); num[1:2,1] *= 100; num[5,5] *= 100
 thresh = 2
 E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 
+### qbuild
+A = RegisterFit.qbuild(2, [-1,1], [0.3 0; 0 0.5], (5,5))
+v1 = 0.3*((-5:5)+1).^2
+v2 = 0.5*((-5:5)-1).^2
+@test_approx_eq A.data v1.+v2'+2
+
 ### Principal Axes Transformation
 
 fixed = zeros(10,11)
