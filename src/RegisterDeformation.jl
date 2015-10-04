@@ -2,7 +2,7 @@ __precompile__()
 
 module RegisterDeformation
 
-using Images, AffineTransforms, Interpolations, FixedSizeArrays, RegisterUtilities
+using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, RegisterUtilities
 using Base.Cartesian
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
 
@@ -401,9 +401,15 @@ deformation `ϕ`.
 """
 function warp(img, ϕ)
     wimg = WarpedArray(img, ϕ)
-    dest = similar(img)
+    dest = similar(img, warp_type(img))
     warp!(dest, wimg)
 end
+
+warp_type{T<:AbstractFloat}(img::AbstractArray{T}) = T
+warp_type{T<:Number}(img::AbstractArray{T}) = Float32
+warp_type{C<:Colorant}(img::AbstractArray{C}) = warp_type(img, eltype(eltype(C)))
+warp_type{C<:Colorant, T<:AbstractFloat}(img::AbstractArray{C}, ::Type{T}) = C
+warp_type{C<:Colorant, T}(img::AbstractArray{C}, ::Type{T}) = base_colorant_type(C){Float32}
 
 """
 `warp!(dest, w::WarpedArray)` instantiates a `WarpedArray` in the output `dest`.
