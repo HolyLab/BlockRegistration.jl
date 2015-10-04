@@ -14,6 +14,5 @@ addons:
       - pkg-config
 script:
   - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
-  - julia -e 'Pkg.clone(pwd()); Pkg.clone("git@github.com:HolyLab/RFFT.jl.git"); Pkg.checkout("FixedSizeArrays"); Pkg.checkout("AffineTransforms")'
-  - julia -e 'Pkg.build("BlockRegistration"); Pkg.test("BlockRegistration")'
-#   - julia --check-bounds=yes -e 'using BlockRegistration; pth = LOAD_PATH[end]; include(joinpath(splitdir(pth)[1], "test", "runtests.jl"))'
+  - julia -e 'Pkg.clone(pwd()); include(Pkg.dir("BlockRegistration","build","build.jl"))'
+  - julia -e 'Pkg.test("BlockRegistration")'
