@@ -62,6 +62,13 @@ function correctbias!{ND,N}(mm::MismatchArray{ND,N})
     mm
 end
 
+function correctbias!{M<:MismatchArray}(mms::AbstractArray{M})
+    for mm in mms
+        correctbias!(mm)
+    end
+    mms
+end
+
 """
 `fixedpad, movingpad = nanpad(fixed, moving)` will pad `fixed` and/or
 `moving` with NaN as needed to ensure that `fixedpad` and `movingpad`
