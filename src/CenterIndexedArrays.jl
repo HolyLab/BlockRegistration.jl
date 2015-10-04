@@ -8,7 +8,7 @@ using Images
 
 import Base: size, eachindex, getindex, setindex!, linearindexing
 import Base: ==, +, -, *, /, .+, .-, .*, ./, .\, .%, .<<, .>>, &, |, $
-import Base: isequal, maximum, minimum, cumsum, permutedims, ipermutedims
+import Base: copy, isequal, maximum, minimum, cumsum, permutedims, ipermutedims
 import Base: mapslices, flipdim
 import Base: show, showcompact, writemime
 using Base.Cartesian
@@ -59,6 +59,17 @@ end
     :($meta; A.data[$(args...)])
 end
 
+typealias Index Union{Colon,AbstractVector}
+
+getindex{T}(A::CenterIndexedArray{T,1}, I::Index) = CenterIndexedArray([A[i] for i in _cindex(A, 1, I)])
+getindex{T}(A::CenterIndexedArray{T,2}, I::Index, J::Index) = CenterIndexedArray([A[i,j] for i in _cindex(A,1,I), j in _cindex(A,2,J)])
+getindex{T}(A::CenterIndexedArray{T,3}, I::Index, J::Index, K::Index) = CenterIndexedArray([A[i,j,k] for i in _cindex(A,1,I), j in _cindex(A,2,J), k in _cindex(A,3,K)])
+
+_cindex(A::CenterIndexedArray, d, I::Range) = first(I) == -last(I) ? I : error("Must be symmetric around zero")
+_cindex(A::CenterIndexedArray, d, I::AbstractVector) = error("unsupported, use a range")
+_cindex(A::CenterIndexedArray, d, ::Colon) = -A.halfsize[d]:A.halfsize[d]
+
+
 @generated function setindex!{T,N}(A::CenterIndexedArray{T,N}, v, i::Number...)
     length(i) == N || error("Must use $N indexes")
     args = [:(i[$d]+A.halfsize[$d]+1) for  d = 1:N]
@@ -73,6 +84,8 @@ end
 isequal(A::CenterIndexedArray, B::CenterIndexedArray) = isequal(A.data, B.data)
 isequal(A::CenterIndexedArray, B::AbstractArray) = isequal(A.data, B)
 isequal(A::AbstractArray, B::CenterIndexedArray) = isequal(A, B.data)
+
+copy(A::CenterIndexedArray) = CenterIndexedArray(copy(A.data))
 
 maximum(A::CenterIndexedArray, region) = maximum(A.data, region)
 minimum(A::CenterIndexedArray, region) = minimum(A.data, region)

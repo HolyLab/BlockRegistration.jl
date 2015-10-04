@@ -2,7 +2,9 @@ Images
 Interpolations
 AffineTransforms
 FixedSizeArrays
-Optim
 NLsolve
+MathProgBase
+Ipopt
+IterativeSolvers
 CUDArt
 CUFFT

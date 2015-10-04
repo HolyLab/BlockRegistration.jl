@@ -17,6 +17,9 @@ for j = -2:2, i = -1:1
     @test A[i,j] == data[k]
 end
 @test_throws BoundsError A[3,5]
+@test A[:,-1:1].data == data[:,2:4]
+@test A[-1:1,:].data == data[:,:]
+@test_throws ErrorException A[:,-2:0]
 k = 0
 for j = -2:2, i = -1:1
     A[i,j] = (k+=1)

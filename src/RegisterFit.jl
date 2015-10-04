@@ -2,16 +2,14 @@
 
 module RegisterFit
 
-using Optim, NLsolve, RegisterPenalty, RegisterCore, AffineTransforms, Interpolations, Optim1d, FixedSizeArrays
-import Optim: optimize, nelder_mead
+using AffineTransforms, Interpolations, FixedSizeArrays, NLsolve
+using RegisterPenalty, RegisterCore, CenterIndexedArrays
 
 import Base: @nloops, @nexprs, @nref
 
 export
     mismatch2affine,
-    optimize,
     optimize_per_aperture,
-    optimize_rigid,
     pat_rotation,
     principalaxes,
     qbuild,
@@ -31,11 +29,6 @@ into categories:
 - `mismatch2affine`: a transformation computed from mismatch data by least squares
 - `pat_rotation`: find the optimal rigid transform via a Principal Axes Transformation
 - `optimize_per_aperture`: naive registration using independent apertures
-
-### Local optimization
-
-- `optimize_rigid`: iterative improve a rigid transformation given raw images
-- `optimize`: iteratively improve an affine transform given mismatch data
 
 ### Utilities
 
@@ -140,115 +133,6 @@ function mismatch2affine(mms, thresh, knots)
     AffineTransform(convert(Matrix{T}, R), convert(Vector{T}, t))
 end
 
-"""
-`tform = optimize(tform0, mms, knots)` performs descent-based
-minimization of the total mismatch penalty as a function of the
-parameters of an affine transformation, starting from an initial guess
-`tform0`.  While this is unlikely to yield very accurate results for
-large rotations or skews (the mismatch data are themselves suspect in
-such cases), it can be helpful for polishing small deformations.
-
-For a good initial guess, see `mismatch2affine`.
-"""
-function optimize(tform::AffineTransform, mmis, knots)
-    gridsize = size(mmis)
-    N = length(gridsize)
-    ndims(tform) == N || error("Dimensionality of tform is $(ndims(tform)), which does not match $N for nums/denoms")
-    mm = first(mmis)
-    mxs = maxshift(mm)
-    T = eltype(eltype(mm))
-    # Compute the bounds
-    asz = arraysize(knots)
-    center = T[(asz[i]+1)/2 for i = 1:N]
-    X = zeros(T, N+1, prod(gridsize))
-    for (i, knot) in enumerate(eachknot(knots))
-        X[1:N,i] = knot - center
-        X[N+1,i] = 1
-    end
-    bound = convert(Vector{T}, [mxs .- register_half; Inf])
-    lower = repeat(-bound, outer=[1,size(X,2)])
-    upper = repeat( bound, outer=[1,size(X,2)])
-    # Extract the parameters from the initial guess
-    Si = tform.scalefwd
-    displacement = tform.offset
-    A = convert(Matrix{T}, [Si-eye(N) displacement; zeros(1,N) 1])
-    # Determine the blocks that start in-bounds
-    AX = A*X
-    keep = trues(gridsize)
-    for j = 1:length(keep)
-        for idim = 1:N
-            xi = AX[idim,j]
-            if xi < -mxs[idim]+register_half_safe || xi > mxs[idim]-register_half_safe
-                keep[j] = false
-                break
-            end
-        end
-    end
-    if !any(keep)
-        @show tform
-        warn("No valid blocks were found")
-        return tform
-    end
-    ignore = !keep[:]
-    lower[:,ignore] = -Inf
-    upper[:,ignore] =  Inf
-    # Assemble the objective and constraints
-    constraints = Optim.ConstraintsL(X', lower', upper')
-    gtmp = Array(Vec{N,T}, gridsize)
-    objective = (x,g) -> affinepenalty!(g, x, mmis, keep, X', gridsize, gtmp)
-    @assert typeof(objective(A', T[])) == T
-    result = interior(DifferentiableFunction(x->objective(x,T[]), Optim.dummy_g!, objective), A', constraints, method=:cg)
-    @assert Optim.converged(result)
-    Aopt = result.minimum'
-    Siopt = Aopt[1:N,1:N] + eye(N)
-    displacementopt = Aopt[1:N,end]
-    AffineTransform(convert(Matrix{T}, Siopt), convert(Vector{T}, displacementopt)), result.f_minimum
-end
-
-"""
-`tform, val = optimize_rigid(penalty, tform0, [SD = eye])` optimizes a
-rigid transformation (rotation + shift) to minimize `penalty`, a
-function mapping an affine transformation to a real value. For
-example:
-
-```
-    penalty = tform -> mismatch0(fixed, transform(moving, tform))
-```
-would result in the minimum mismatch between `fixed` and `moving`.
-`val` is the value of `penalty` at the minimum.
-
-`tform0` is an initial guess.  Use `SD` if your axes are not uniformly
-sampled, for example `SD = diagm(voxelspacing)` where `voxelspacing`
-is a vector encoding the spacing along all axes of the image.
-"""
-function optimize_rigid(penalty::Function, A::AffineTransform, SD = eye(ndims(A)); ftol=1e-4)
-    R = SD*A.scalefwd/SD
-    rotp = rotationparameters(R)
-    dx = A.offset
-    p0 = [rotp; dx]
-    objective = p -> penalty(p2rigid(p, SD))
-    results = nelder_mead(objective, p0, initial_step=[fill(0.05, length(rotp)); ones(length(dx))], ftol=ftol)
-    p2rigid(results.minimum, SD), results.f_minimum
-end
-
-function optim1d{T,N}(penalty::Function, Anew::AffineTransform{T,N}, Aold = AffineTransform(eye(T,N),zeros(T,N)); p0 = NaN)
-    if !isfinite(p0)
-        p0 = penalty(Aold)
-    end
-    # Factor Anew so we can take powers of it
-    Anewm = [Anew.scalefwd Anew.offset; zeros(T, 1, N) one(T)]
-    D, V = eig(Anewm)
-    penalty1d = alpha->factoredaffinepenalty(penalty, alpha, Aold, D, V)
-    # Pick trial step so that 1.0 will be the highest value tested among the first three
-    al, am, ar = bracket(penalty1d, 0.0, 1/2.618, p0)
-    @show al, am, ar
-    result = Optim.brent(penalty1d, al, ar)
-    @show result.minimum
-    AnewOpt = factoredaffine(result.minimum, D, V)
-    @show AnewOpt
-    @show Aold
-    AnewOpt, result.f_minimum
-end
 
 """
 `u = optimize_per_aperture(mms, thresh)` computes the "naive"
@@ -281,12 +165,12 @@ ratio given the quadratic form parameters `E0, u0, Q` obtained from
 function qbuild(E0::Real, umin::Vector, Q::Matrix, maxshift)
     d = length(maxshift)
     (size(Q,1) == d && size(Q,2) == d && length(umin) == d) || error("Size mismatch")
-    szoutv = 2*[maxshift...]+1
-    out = zeros(eltype(Q), tuple(szoutv...))
+    szout = ((2*[maxshift...]+1)...)
+    out = zeros(eltype(Q), szout)
     j = 1
     du = similar(umin)
-    Qdu = similar(umin)
-    for c in Counter(szoutv)
+    Qdu = similar(umin, typeof(one(eltype(Q))*one(eltype(du))))
+    for c in CartesianRange(szout)
         for idim = 1:d
             du[idim] = c[idim] - maxshift[idim] - 1 - umin[idim]
         end
@@ -294,7 +178,7 @@ function qbuild(E0::Real, umin::Vector, Q::Matrix, maxshift)
         out[j] = E0 + uQu
         j += 1
     end
-    out
+    CenterIndexedArray(out)
 end
 
 """
@@ -428,50 +312,6 @@ function pat_at(S, SD, c, fmean, mmean)
 end
 
 #### Low-level utilities
-
-function _calculate_u{N}(At, Xt, gridsize::NTuple{N})
-    Ut = Xt*At
-    u = Ut[:,1:size(Ut,2)-1]'                   # discard the dummy dimension
-    reinterpret(Vec{N, eltype(u)}, u, gridsize) # put u in the shape of the grid
-end
-
-function affinepenalty!{N}(g, At, mmis, keep, Xt, gridsize::NTuple{N}, gtmp)
-    u = _calculate_u(At, Xt, gridsize)
-    @assert eltype(u) == eltype(At)
-    val = penalty!(gtmp, u, mmis, keep)
-    @assert isa(val, eltype(At))
-    if !isempty(g)
-        T = eltype(eltype(gtmp))
-        nblocks = size(Xt,1)
-        At_mul_Bt!(g, Xt, [reinterpret(T,gtmp,(N,nblocks)); zeros(1,nblocks)])
-    end
-    val
-end
-
-function factoredaffine(alpha, D, V)
-    Anewm = real(V*Diagonal(D.^alpha)/V)
-    AffineTransform(Anewm[1:end-1,1:end-1], Anewm[1:end-1,end])
-end
-
-function factoredaffinepenalty(penalty, alpha, Aold, D, V)
-    Anew = factoredaffine(alpha, D, V)
-    A = Anew*Aold
-    ret = penalty(A)
-    @show alpha, ret
-    ret
-end
-
-function p2rigid(p, SD)
-    if length(p) == 1
-        return AffineTransform([1], p)  # 1 dimension
-    elseif length(p) == 3
-        return AffineTransform(SD\(rotation2(p[1])*SD), p[2:end])    # 2 dimensions
-    elseif length(p) == 6
-        return AffineTransform(SD\(rotation3(p[1:3])*SD), p[4:end])  # 3 dimensions
-    else
-        error("Dimensionality not supported")
-    end
-end
 
 @generated function qfit_core!{T,N}(dE::Array{T,2}, V4::Array{T,2}, C::Array{T,4}, mm::Array{NumDenom{T},N}, thresh, umin::NTuple{N,Int}, E0)
     # The cost of generic matrix-multiplies is too high, so we write

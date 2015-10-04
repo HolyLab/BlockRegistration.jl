@@ -1,7 +1,8 @@
 import RegisterMismatch
-using CenterIndexedArrays
+using CenterIndexedArrays, RegisterCore
 using Base.Test
 
+# Iterators
 agrid = [(1,1)  (1,3)  (1,5)  (1,7);
          (4,1)  (4,3)  (4,5)  (4,7);
          (7,1)  (7,3)  (7,5)  (7,7);
@@ -16,6 +17,21 @@ for (i,pt) in enumerate(RegisterMismatch.each_point(agrida))
 end
 
 @test RegisterMismatch.aperture_range((15,), (7,)) == (12:18,)
+
+# Bias correction
+mma = fill(NumDenom(2.0,0.5), 3, 3)
+for i = 1:3
+    mma[2,i] = NumDenom(rand(),rand())
+    mma[i,2] = NumDenom(rand(),rand())
+end
+mm = CenterIndexedArray(mma)
+RegisterMismatch.correctbias!(mm)
+mm1 = mm[0,0]
+for I in eachindex(mm)
+    mmI = mm[I]
+    @test_approx_eq mmI.num mm1.num
+    @test_approx_eq mmI.denom mm1.denom
+end
 
 RMlist = (RegisterMismatch,)
 mdutils = nothing
