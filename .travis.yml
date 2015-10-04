@@ -1,14 +1,17 @@
 # Documentation: http://docs.travis-ci.com/user/languages/julia/
 language: julia
-sudo: true
 os:
   - linux
 julia:
   - 0.4
 notifications:
   email: false
-before_install:
-  - sudo apt-get install build-essential gfortran pkg-config
+addons:
+  apt:
+    packages:
+      - build-essential
+      - gfortran
+      - pkg-config
 script:
   - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
   - julia -e 'Pkg.clone(pwd()); Pkg.clone("git@github.com:HolyLab/RFFT.jl.git"); Pkg.checkout("FixedSizeArrays"); Pkg.checkout("AffineTransforms")'
