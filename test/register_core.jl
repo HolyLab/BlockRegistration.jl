@@ -11,7 +11,7 @@ nd = RegisterCore.NumDenom(3.5f0,10)
 
 num, denom = rand(3,3), rand(3,3)+0.5
 mm = RegisterCore.MismatchArray(num, denom)
-r = num./denom
+r = CenterIndexedArray(num./denom)
 @test RegisterCore.ratio(mm, 0.25) == r
 @test RegisterCore.ratio(r, 0.25) == r
 

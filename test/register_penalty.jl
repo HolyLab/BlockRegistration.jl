@@ -190,7 +190,7 @@ for nd = 1:3
             ud = convert(Array{Dual{Float64}}, u_raw)
             ud[idim,i] = dual(u_raw[idim,i], 1)
             vald = RP.penalty!(nothing, GridDeformation(ud, imgsize), identity, dp, mmis)
-            @test_approx_eq g[i][idim] epsilon(vald)
+            @test_approx_eq_eps g[i][idim] epsilon(vald) 1e-12
         end
     end
 
@@ -203,7 +203,7 @@ for nd = 1:3
             ud = convert(Array{Dual{Float64}}, u_raw)
             ud[idim,i] = dual(u_raw[idim,i], 1)
             vald = RP.penalty!(nothing, GridDeformation(ud, imgsize), ϕ_old, dp, mmis)
-            @test_approx_eq g[i][idim] epsilon(vald)
+            @test_approx_eq_eps g[i][idim] epsilon(vald) 1e-12
         end
     end
 
