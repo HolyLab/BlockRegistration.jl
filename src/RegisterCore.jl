@@ -4,7 +4,7 @@ module RegisterCore
 
 using CenterIndexedArrays
 using Base.Cartesian: @nloops, @nref, @ntuple
-using Images
+using Images, ColorTypes
 
 import Base: +, -, *, /
 import Base: eltype, getindex, ndims, pointer, setindex!, show, size
@@ -189,6 +189,9 @@ immutable NumDenom{T<:Number}
     num::T
     denom::T
 end
+NumDenom(n::Gray, d::Gray) = NumDenom(gray(n), gray(d))
+NumDenom(n::Gray, d) = NumDenom(gray(n), d)
+NumDenom(n, d::Gray) = NumDenom(n, gray(d))
 NumDenom(n, d) = NumDenom(promote(n, d)...)
 
 (+)(p1::NumDenom, p2::NumDenom) = NumDenom(p1.num+p2.num, p1.denom+p2.denom)
