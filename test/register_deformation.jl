@@ -217,3 +217,9 @@ for i = 1:prod(gridsize)
     gj[rng,rng] = eye(2,2)
 end
 compare_g(g, gj, gridsize)
+
+# warpgrid
+knots = (linspace(1,100,4), linspace(1,100,3))
+gridsize = map(length, knots)
+ϕ = RegisterDeformation.GridDeformation(5*randn(2,gridsize...), knots)
+A = RegisterDeformation.warpgrid(ϕ)

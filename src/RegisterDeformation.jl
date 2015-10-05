@@ -445,7 +445,7 @@ nodes centered on the control points as specified by the knots of `ϕ`.
 """
 function warpgrid(ϕ)
     imsz = map(x->convert(Int, last(x)), ϕ.knots)
-    img = zeros(eltype(u), imsz)
+    img = zeros(eltype(eltype(ϕ.u)), imsz)
     imsza = Any[imsz...]
     for idim = 1:ndims(img)
         indexes = map(s -> 1:s, imsza)
