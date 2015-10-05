@@ -250,7 +250,8 @@ end
 
 """
 `ϕ_c = ϕ_old(ϕ_new)` computes the composition of two deformations,
-yielding a deformation for which `ϕ_c(x) ≈ ϕ_old(ϕ_new(x))`.
+yielding a deformation for which `ϕ_c(x) ≈ ϕ_old(ϕ_new(x))`. `ϕ_old`
+must be interpolating (see `interpolate(ϕ_old)`).
 
 `ϕ_c, g = compose(ϕ_old, ϕ_new)` also yields the gradient `g` of `ϕ_c`
 with respect to `u_new`.  `g[i,j,...]` is the Jacobian matrix at grid
@@ -439,20 +440,34 @@ function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ϕ)
 end
 
 """
-`img = warpgrid(ϕ)` returns an image `img` that permits visualization
-of the deformation `ϕ`.  The output is a warped rectangular grid with
-nodes centered on the control points as specified by the knots of `ϕ`.
+
+`img = warpgrid(ϕ; [scale=1, showidentity=false])` returns an image
+`img` that permits visualization of the deformation `ϕ`.  The output
+is a warped rectangular grid with nodes centered on the control points
+as specified by the knots of `ϕ`.
+
+`scale` multiplies `ϕ.u`, effectively making the deformation stronger
+(for `scale > 1`).  This can be useful if you are trying to visualize
+subtle changes. If `showidentity` is `true`, the actual deformation is
 """
-function warpgrid(ϕ)
+function warpgrid(ϕ; scale=1, showidentity::Bool=false)
     imsz = map(x->convert(Int, last(x)), ϕ.knots)
-    img = zeros(eltype(eltype(ϕ.u)), imsz)
+    img = zeros(Float32, imsz)
     imsza = Any[imsz...]
     for idim = 1:ndims(img)
         indexes = map(s -> 1:s, imsza)
-        indexes[idim] = round(Int, ϕ.knots[idim])
+        indexes[idim] = clamp(round(Int, ϕ.knots[idim]), 2, imsz[idim]-1)
         img[indexes...] = 1
     end
-    warp(img, ϕ)
+    if scale != 1
+        ϕ = GridDeformation(scale*ϕ.u, ϕ.knots)
+    end
+    wimg = warp(img, ϕ)
+    if showidentity
+        n = ndims(img)+1
+        return reinterpret(RGB{Float32}, permutedims(cat(n, wimg, img, wimg), (n,1:ndims(img)...)))
+    end
+    wimg
 end
 
 # TODO?: do we need to return real values beyond-the-edge for a SubArray?
