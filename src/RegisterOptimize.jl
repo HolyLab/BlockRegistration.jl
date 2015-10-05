@@ -7,9 +7,9 @@ using RegisterCore, RegisterDeformation, RegisterMismatch, RegisterPenalty
 using Base.Test
 
 import Base: *
-import MathProgBase: MathProgSolverInterface
+import MathProgBase: SolverInterface
 
-abstract GradOnly <: MathProgSolverInterface.AbstractNLPEvaluator
+abstract GradOnly <: SolverInterface.AbstractNLPEvaluator
 
 # Some necessary ForwardDiff extensions to make Interpolations work
 Base.real(v::ForwardDiff.GradientNumber) = real(v.value)
@@ -65,16 +65,16 @@ function optimize_rigid(fixed, moving, A::AffineTransform, maxshift, SD = eye(nd
     solver = IpoptSolver(hessian_approximation="limited-memory",
                          print_level=print_level,
                          tol=tol)
-    m = MathProgSolverInterface.model(solver)
+    m = SolverInterface.model(solver)
     ub = T[fill(pi, length(p0)-length(maxshift)); [maxshift...]]
-    MathProgSolverInterface.loadnonlinearproblem!(m, length(p0), 0, -ub, ub, T[], T[], :Min, objective)
-    MathProgSolverInterface.setwarmstart!(m, p0)
-    MathProgSolverInterface.optimize!(m)
+    SolverInterface.loadnonlinearproblem!(m, length(p0), 0, -ub, ub, T[], T[], :Min, objective)
+    SolverInterface.setwarmstart!(m, p0)
+    SolverInterface.optimize!(m)
 
-    stat = MathProgSolverInterface.status(m)
+    stat = SolverInterface.status(m)
     stat == :Optimal || warn("Solution was not optimal")
-    p = MathProgSolverInterface.getsolution(m)
-    fval = MathProgSolverInterface.getobjval(m)
+    p = SolverInterface.getsolution(m)
+    fval = SolverInterface.getobjval(m)
 
     p2rigid(p, SD), fval
 end
@@ -99,7 +99,7 @@ to_float{T}(::Type{T}, A, B) = convert(Array{Float32}, A), convert(Array{Float32
 ###
 ### Rigid registration from raw images, MathProg interface
 ###
-type RigidValue{N,A<:AbstractArray,I<:AbstractExtrapolation,SDT} <: MathProgSolverInterface.AbstractNLPEvaluator
+type RigidValue{N,A<:AbstractArray,I<:AbstractExtrapolation,SDT} <: SolverInterface.AbstractNLPEvaluator
     fixed::A
     wfixed::A
     moving::I
@@ -141,21 +141,21 @@ function RigidOpt(fixed, moving, SD, thresh)
     RigidOpt(rv, g)
 end
 
-function MathProgSolverInterface.initialize(d::GradOnly, requested_features::Vector{Symbol})
+function SolverInterface.initialize(d::GradOnly, requested_features::Vector{Symbol})
     for feat in requested_features
         if !(feat in [:Grad, :Jac])
             error("Unsupported feature $feat")
         end
     end
 end
-MathProgSolverInterface.features_available(d::GradOnly) = [:Grad, :Jac]
+SolverInterface.features_available(d::GradOnly) = [:Grad, :Jac]
 
-MathProgSolverInterface.eval_f(d::RigidOpt, x) = d.rv(x)
-MathProgSolverInterface.eval_g(d::RigidOpt, g, x) = nothing
-MathProgSolverInterface.eval_grad_f(d::RigidOpt, grad_f, x) =
+SolverInterface.eval_f(d::RigidOpt, x) = d.rv(x)
+SolverInterface.eval_g(d::RigidOpt, g, x) = nothing
+SolverInterface.eval_grad_f(d::RigidOpt, grad_f, x) =
     copy!(grad_f, d.g(x))
-MathProgSolverInterface.jac_structure(d::RigidOpt) = Int[], Int[]
-MathProgSolverInterface.eval_jac_g(d::RigidOpt, J, x) = nothing
+SolverInterface.jac_structure(d::RigidOpt) = Int[], Int[]
+SolverInterface.eval_jac_g(d::RigidOpt, J, x) = nothing
 
 ###
 ### Globally-optimal initial guess for deformation given
@@ -233,17 +233,17 @@ function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_lev
     solver = IpoptSolver(hessian_approximation="limited-memory",
                          print_level=print_level,
                          tol=tol)
-    m = MathProgSolverInterface.model(solver)
+    m = SolverInterface.model(solver)
     ub1 = T[mxs...] - T(0.5001)
     ub = repeat(ub1, outer=[length(ϕ.u)])
-    MathProgSolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
-    MathProgSolverInterface.setwarmstart!(m, uvec)
-    MathProgSolverInterface.optimize!(m)
+    SolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
+    SolverInterface.setwarmstart!(m, uvec)
+    SolverInterface.optimize!(m)
 
-    stat = MathProgSolverInterface.status(m)
+    stat = SolverInterface.status(m)
     stat == :Optimal || warn("Solution was not optimal")
-    uopt = MathProgSolverInterface.getsolution(m)
-    fval = MathProgSolverInterface.getobjval(m)
+    uopt = SolverInterface.getsolution(m)
+    fval = SolverInterface.getobjval(m)
     copy!(uvec, uopt)
     ϕ, fval
 end
@@ -265,22 +265,22 @@ type DeformOpt{D,Dold,DP,M} <: GradOnly
     mmis::M
 end
 
-function MathProgSolverInterface.eval_f(d::DeformOpt, x)
+function SolverInterface.eval_f(d::DeformOpt, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(nothing, d.ϕ, d.ϕ_old, d.dp, d.mmis)
 end
 
-MathProgSolverInterface.eval_g(d::DeformOpt, g, x) = nothing
+SolverInterface.eval_g(d::DeformOpt, g, x) = nothing
 
-function MathProgSolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
+function SolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(vec_as_u(grad_f, d.ϕ), d.ϕ, d.ϕ_old, d.dp, d.mmis)
 end
 
-MathProgSolverInterface.jac_structure(d::DeformOpt) = Int[], Int[]
-MathProgSolverInterface.eval_jac_g(d::DeformOpt, J, x) = nothing
+SolverInterface.jac_structure(d::DeformOpt) = Int[], Int[]
+SolverInterface.eval_jac_g(d::DeformOpt, J, x) = nothing
 
 ###
 ### Mismatch-based optimization of affine transformation
