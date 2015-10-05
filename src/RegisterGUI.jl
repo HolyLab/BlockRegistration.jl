@@ -56,7 +56,7 @@ export showoverlay, displaymismatch
 #     return ret
 # end
 
-function showoverlay(img1, img2; clim = (0,255), kwargs...)
+function showoverlay(img1, img2; clim = (0,1), kwargs...)
     if length(clim) != 2
         error("clim must be either (min,max) or ((min1,max1),(min2,max2))")
     end
@@ -67,7 +67,7 @@ function showoverlay(img1, img2; clim = (0,255), kwargs...)
     view(ovr; kwargs...)
 end
 
-function showoverlay(img1, img2, img3; clim = (0,255), kwargs...)
+function showoverlay(img1, img2, img3; clim = (0,1), kwargs...)
     if length(clim) != 2 && length(clim) != 3
         error("clim must be either (min,max) or ((min1,max1),(min2,max2),(min3,max3))")
     end
