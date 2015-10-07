@@ -4,12 +4,31 @@ module RegisterOptimize
 
 using MathProgBase, Ipopt, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers
 using RegisterCore, RegisterDeformation, RegisterMismatch, RegisterPenalty
+using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base.Test
 
 import Base: *
 import MathProgBase: SolverInterface
 
+# Some conveniences for MathProgBase
 abstract GradOnly <: SolverInterface.AbstractNLPEvaluator
+
+function SolverInterface.initialize(d::GradOnly, requested_features::Vector{Symbol})
+    for feat in requested_features
+        if !(feat in [:Grad, :Jac])
+            error("Unsupported feature $feat")
+        end
+    end
+end
+SolverInterface.features_available(d::GradOnly) = [:Grad, :Jac]
+
+
+abstract GradOnlyBoundsOnly <: GradOnly
+
+SolverInterface.eval_g(::GradOnlyBoundsOnly, g, x) = nothing
+SolverInterface.jac_structure(::GradOnlyBoundsOnly) = Int[], Int[]
+SolverInterface.eval_jac_g(::GradOnlyBoundsOnly, J, x) = nothing
+
 
 # Some necessary ForwardDiff extensions to make Interpolations work
 Base.real(v::ForwardDiff.GradientNumber) = real(v.value)
@@ -130,7 +149,7 @@ function Base.call(d::RigidValue, x)
     sumabs2(f-m)/den
 end
 
-type RigidOpt{RV<:RigidValue,G} <: GradOnly
+type RigidOpt{RV<:RigidValue,G} <: GradOnlyBoundsOnly
     rv::RV
     g::G
 end
@@ -141,21 +160,9 @@ function RigidOpt(fixed, moving, SD, thresh)
     RigidOpt(rv, g)
 end
 
-function SolverInterface.initialize(d::GradOnly, requested_features::Vector{Symbol})
-    for feat in requested_features
-        if !(feat in [:Grad, :Jac])
-            error("Unsupported feature $feat")
-        end
-    end
-end
-SolverInterface.features_available(d::GradOnly) = [:Grad, :Jac]
-
 SolverInterface.eval_f(d::RigidOpt, x) = d.rv(x)
-SolverInterface.eval_g(d::RigidOpt, g, x) = nothing
 SolverInterface.eval_grad_f(d::RigidOpt, grad_f, x) =
     copy!(grad_f, d.g(x))
-SolverInterface.jac_structure(d::RigidOpt) = Int[], Int[]
-SolverInterface.eval_jac_g(d::RigidOpt, J, x) = nothing
 
 ###
 ### Globally-optimal initial guess for deformation given
@@ -258,7 +265,7 @@ function vec_as_u{T,N}(g::Array{T}, ϕ::GridDeformation{T,N})
     reinterpret(Vec{N,T}, g, size(ϕ.u))
 end
 
-type DeformOpt{D,Dold,DP,M} <: GradOnly
+type DeformOpt{D,Dold,DP,M} <: GradOnlyBoundsOnly
     ϕ::D
     ϕ_old::Dold
     dp::DP
@@ -271,16 +278,11 @@ function SolverInterface.eval_f(d::DeformOpt, x)
     penalty!(nothing, d.ϕ, d.ϕ_old, d.dp, d.mmis)
 end
 
-SolverInterface.eval_g(d::DeformOpt, g, x) = nothing
-
 function SolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(vec_as_u(grad_f, d.ϕ), d.ϕ, d.ϕ_old, d.dp, d.mmis)
 end
-
-SolverInterface.jac_structure(d::DeformOpt) = Int[], Int[]
-SolverInterface.eval_jac_g(d::DeformOpt, J, x) = nothing
 
 ###
 ### Mismatch-based optimization of affine transformation
