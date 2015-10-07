@@ -6,6 +6,7 @@ module RegisterPenalty
 
 using Interpolations, FixedSizeArrays, Base.Cartesian
 using RegisterDeformation, RegisterCore, CenterIndexedArrays
+using RegisterDeformation: convert_from_fixed, convert_to_fixed
 
 export AffinePenalty, DeformationPenalty, penalty!, interpolate_mm!
 
@@ -276,13 +277,13 @@ function penalty!{T,N}(g, dp::AffinePenalty, u::AbstractArray{Vec{N,T},N})
         return λ * one(eltype(F)) * one(T)
     end
     n = length(u)
-    U = reinterpret(T, u, (N, n))
+    U = convert_from_fixed(u, (n,)) # reinterpret(T, u, (N, n))
     A = (U*F)*F'   # projection onto an affine transformation
     dU = U-A
     λ /= n
     if g != nothing && !isempty(g)
         λ2 = 2λ
-        du = reinterpret(Vec{N,T}, dU, (n,))
+        du = convert_to_fixed(dU) #reinterpret(Vec{N,T}, dU, (n,))
         for j=1:n
             g[j] = λ2*du[j]
         end

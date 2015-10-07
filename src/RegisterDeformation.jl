@@ -136,17 +136,40 @@ function GridDeformation{N}(u::NTuple{N}, knots::NTuple{N})
     GridDeformation(uf, knots)
 end
 
-function convert_to_fixed{T}(u::Array{T})
-    N = size(u,1)
+function convert_to_fixed{T}(u::Array{T}, sz=size(u))
+    N = sz[1]
     if isbits(T)
-        uf = reinterpret(Vec{N,T}, u, Base.tail(size(u)))
+        uf = reinterpret(Vec{N,T}, u, Base.tail(sz))
     else
-        uf = Array(Vec{N,T}, Base.tail(size(u)))
-        for i = 1:length(uf)
-            uf[i] = Vec(u[:,i]...)
-        end
+        uf = Array(Vec{N,T}, Base.tail(sz))
+        copy_ctf!(uf, u)
     end
     uf
+end
+
+@generated function copy_ctf!{N,T}(dest::Array{Vec{N,T}}, src::Array)
+    exvec = [:(src[offset+$d]) for d=1:N]
+    quote
+        for i = 1:length(dest)
+            offset = (i-1)*N
+            dest[i] = Vec($(exvec...))
+        end
+        dest
+    end
+end
+
+function convert_from_fixed{N,T}(uf::Array{Vec{N,T}}, sz=size(uf))
+    if isbits(T)
+        u = reinterpret(T, uf, (N, sz...))
+    else
+        u = Array(T, (N, sz...))
+        for i = 1:length(uf)
+            for d = 1:N
+                u[d,i] = uf[i][d]
+            end
+        end
+    end
+    u
 end
 
 function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV})
