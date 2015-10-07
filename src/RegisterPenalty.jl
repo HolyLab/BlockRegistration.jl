@@ -11,8 +11,6 @@ using RegisterDeformation: convert_from_fixed, convert_to_fixed
 export AffinePenalty, DeformationPenalty, penalty!, interpolate_mm!
 
 
-abstract DeformationPenalty{T}
-
 """
 # RegisterPenalty
 
@@ -30,6 +28,10 @@ The main exported types/functions are:
 """
 RegisterPenalty
 
+
+abstract DeformationPenalty{T}
+Base.eltype{T}(::Type{DeformationPenalty{T}}) = T
+Base.eltype{DP<:DeformationPenalty}(::Type{DP}) = eltype(super(DP))
 
 """
 
@@ -219,11 +221,11 @@ When the deformation is defined on a regular grid, `knots` can be an
 NTuple of knot-vectors; otherwise, it should be an
 `ndims`-by-`npoints` matrix that stores the knot locations in columns.
 """
-type AffinePenalty{T} <: DeformationPenalty{T}
+type AffinePenalty{T,N} <: DeformationPenalty{T}
     F::Matrix{T}   # geometry data for the affine-residual penalty
     λ::T           # regularization coefficient
 
-    function AffinePenalty{N}(knots::NTuple{N}, λ)
+    function AffinePenalty(knots::NTuple{N}, λ)
         gridsize = map(length, knots)
         C = Array(Float64, prod(gridsize), N+1)
         i = 0
@@ -244,9 +246,9 @@ type AffinePenalty{T} <: DeformationPenalty{T}
     end
 end
 
-AffinePenalty{V<:AbstractVector,N}(knots::NTuple{N,V}, λ) = AffinePenalty{eltype(V)}(knots, λ)
-AffinePenalty{V<:AbstractVector}(knots::AbstractVector{V}, λ) = AffinePenalty{eltype(V)}((knots...), λ)
-AffinePenalty{T}(knots::AbstractMatrix{T}, λ) = AffinePenalty{T}(knots, λ)
+AffinePenalty{V<:AbstractVector,N}(knots::NTuple{N,V}, λ) = AffinePenalty{eltype(V),N}(knots, λ)
+AffinePenalty{V<:AbstractVector}(knots::AbstractVector{V}, λ) = AffinePenalty{eltype(V),length(knots)}((knots...), λ)
+AffinePenalty{T}(knots::AbstractMatrix{T}, λ) = AffinePenalty{T,size(knots,1)}(knots, λ)
 
 
 """
