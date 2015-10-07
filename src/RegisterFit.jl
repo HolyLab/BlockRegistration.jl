@@ -208,6 +208,11 @@ function uclamp!{T<:Number}(u::AbstractArray{T}, maxshift)
     u
 end
 
+function uclamp!{T<:FixedArray}(u::AbstractArray{T}, maxshift)
+    uclamp!(reinterpret(eltype(T), u, (length(T), size(u)...)), maxshift)
+    u
+end
+
 """
 `center, cov = principalaxes(img)` computes the principal axes of an
 image `img`.  `center` is the centroid of intensity, and `cov` the
