@@ -219,23 +219,31 @@ end
 # Composition ϕ_old(ϕ_new(x))
 function Base.call{T1,T2,N,A<:AbstractInterpolation}(
         ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
-    u, knots = ϕ_old.u, ϕ_old.knots
+    uold, knots = ϕ_old.u, ϕ_old.knots
     if !isa(ϕ_new.u, AbstractInterpolation)
         ϕ_new.knots == knots || error("If knots are incommensurate, ϕ_new must be interpolating")
     end
-    sz = map(length, knots)
-    x = knot(knots, 1)
-    out = _compose(u, ϕ_new, x, 1)
-    ucomp = similar(u, typeof(out))
-    for I in CartesianRange(sz)
-        ucomp[I] = _compose(u, ϕ_new, knot(knots, I), I)
-    end
+    ucomp = _compose(uold, ϕ_new.u, knots)
     GridDeformation(ucomp, knots)
 end
 
-function _compose(u, ϕ_new, x, i)
-    dx = lookup(ϕ_new.u, x, i)
-    dx + vecindex(u, x+dx)
+Base.call(ϕ_old::GridDeformation, ϕ_new::GridDeformation) =
+    error("ϕ_old must be interpolating")
+
+function _compose(uold, unew, knots)
+    sz = map(length, knots)
+    x = knot(knots, 1)
+    out = _compose(uold, unew, x, 1)
+    ucomp = similar(uold, typeof(out))
+    for I in CartesianRange(sz)
+        ucomp[I] = _compose(uold, unew, knot(knots, I), I)
+    end
+    ucomp
+end
+
+function _compose(uold, unew, x, i)
+    dx = lookup(unew, x, i)
+    dx + vecindex(uold, x+dx)
 end
 
 lookup(u::AbstractInterpolation, x, i) = vecindex(u, x)
@@ -287,9 +295,10 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(
         ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
     u, knots = ϕ_old.u, ϕ_old.knots
     ϕ_new.knots == knots || error("Not yet implemented for incommensurate knots")
+    unew = ϕ_new.u
     sz = map(length, knots)
     x = knot(knots, 1)
-    out = _compose(u, ϕ_new, x, 1)
+    out = _compose(u, unew, x, 1)
     ucomp = similar(u, typeof(out))
     TG = Mat{N,N,eltype(out)}
     g = Array(TG, size(u))
@@ -297,7 +306,7 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(
     eyeN = eye(TG)
     for I in CartesianRange(sz)
         x = knot(knots, I)
-        dx = lookup(ϕ_new.u, x, I)
+        dx = lookup(unew, x, I)
         y = x + dx
         ucomp[I] = dx + vecindex(u, y)
         vecgradient!(gtmp, u, y)
