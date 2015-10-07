@@ -169,56 +169,157 @@ SolverInterface.eval_grad_f(d::RigidOpt, grad_f, x) =
 ### quadratic-fit mismatch data
 ###
 """
-`u0 = initial_deformation(dp::AffinePenalty, cs, Qs)` prepares a
-globally-optimal initial guess for a deformation, given a quadratic
-fit to the aperture-wise mismatch data. `cs` and `Qs` must be
-arrays-of-arrays in the shape of the u0-grid, each entry as calculated
-by `qfit`.
+`u0 = initial_deformation(ap::AffinePenalty, cs, Qs;
+[ϕ_old=identity])` prepares a globally-optimal initial guess for a
+deformation, given a quadratic fit to the aperture-wise mismatch
+data. `cs` and `Qs` must be arrays-of-arrays in the shape of the
+u0-grid, each entry as calculated by `qfit`. The initial guess
+minimizes the function
+
+```
+    ap(ϕ(u0)) + ∑_i (u0[i]-cs[i])' * Qs[i] * (u0[i]-cs[i])
+```
+where `ϕ(u0)` is the deformation associated with `u0`.
+
+If `ϕ_old` is not the identity, it must be interpolating.
 """
-function initial_deformation(ap::AffinePenalty, cs, Qs)
-    n = prod(size(Qs))
-    c = first(cs)
-    N = length(c)
-    b = zeros(eltype(c), N*n)
-    for i = 1:n
-        b[(i-1)*N+1:i*N] = Qs[i]*cs[i]
-    end
+function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
+    b = prep_b(T, cs, Qs)
     # In case the grid is really big, solve iteratively
     # (The matrix is not sparse, but matrix-vector products can be
     # computed efficiently.)
-    P = AffineQHessian(ap, Qs)
-    x, _ = cg(P, b)
-    u0 = reinterpret(Vec{N,eltype(x)}, x, size(cs))
+    P = AffineQHessian(ap, Qs, identity)
+    x = find_opt(P, b)
+    u0 = convert_to_fixed(x, (N,size(cs)...)) #reinterpret(Vec{N,eltype(x)}, x, size(cs))
 end
 
-type AffineQHessian{T,QA}
-    ap::AffinePenalty{T}
-    Qs::QA
+function prep_b{T}(::Type{T}, cs, Qs)
+    n = prod(size(Qs))
+    N = length(first(cs))
+    b = zeros(T, N*n)
+    for i = 1:n
+        b[(i-1)*N+1:i*N] = Qs[i]*cs[i]
+    end
+    b
 end
 
-Base.eltype{T,QA}(::Type{AffineQHessian{T,QA}}) = T
+function find_opt(P, b)
+    x, result = cg(P, b)
+    @assert result.isconverged
+    x
+end
+
+# A type for computing multiplication by the linear operator
+type AffineQHessian{AP<:AffinePenalty,M<:Mat,N,Φ}
+    ap::AP
+    Qs::Array{M,N}
+    ϕ_old::Φ
+end
+
+function AffineQHessian(ap::AffinePenalty, Qs::AbstractArray, ϕ_old)
+    T = eltype(first(Qs))
+    N = ndims(Qs)
+    AffineQHessian{typeof(ap),Mat{N,N,T},N,typeof(ϕ_old)}(ap, Qs, ϕ_old)
+end
+
+Base.eltype{AP,M,N,Φ}(::Type{AffineQHessian{AP,M,N,Φ}}) = eltype(AP)
+Base.eltype(P::AffineQHessian) = eltype(typeof(P))
 Base.size(P::AffineQHessian, d) = length(P.Qs)*size(first(P.Qs),1)
 
-function (*)(P::AffineQHessian, x::AbstractVector)
+# These compute the gradient of (x'*P*x)/2, where P is the Hessian
+# for the objective in the doc text for initial_deformation.
+function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     gridsize = size(P.Qs)
     n = prod(gridsize)
-    N = size(first(P.Qs), 1)
-    U = reshape(x, N, n)
-    F = P.ap.F
-    A = (U*F)*F'
-    g = P.ap.λ*(U-A)
-    u = Array(eltype(U), N)
-    Qu = similar(u)
+    u = convert_to_fixed(x, (N,gridsize...)) #reinterpret(Vec{N,T}, x, gridsize)
+    g = similar(u)
+    λ = P.ap.λ
+    P.ap.λ = λ*n/2
+    affine_part!(g, P, u)
+    P.ap.λ = λ
     for i = 1:n
-        for d = 1:N
-            u[d] = U[d,i]
-        end
-        A_mul_B!(Qu, P.Qs[i], u)
-        for d = 1:N
-            g[(i-1)*N+d] += Qu[d]
-        end
+        g[i] += P.Qs[i] * u[i]
     end
-    vec(g)
+    reinterpret(T, g, size(x))
+end
+
+affine_part!(g, P, u) = penalty!(g, P.ap, u)
+
+
+function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs, ϕ_old, maxshift)
+    error("This is broken, don't use it")
+    b = prep_b(T, cs, Qs)
+    # In case the grid is really big, solve iteratively
+    # (The matrix is not sparse, but matrix-vector products can be
+    # computed efficiently.)
+    P0 = AffineQHessian(ap, Qs, identity)
+    x0 = find_opt(P0, b)
+    P = AffineQHessian(ap, Qs, ϕ_old)
+    x = find_opt(P, b, maxshift, x0)
+    u0 = convert_to_fixed(x, (N,size(cs)...)) #reinterpret(Vec{N,eltype(x)}, x, size(cs))
+end
+
+# type for minimization with composition (which turns the problem into
+# a nonlinear problem)
+type InitialDefOpt{AQH,B} <: GradOnlyBoundsOnly
+    P::AQH
+    b::B
+end
+
+function find_opt{AP,M,N,Φ<:GridDeformation}(P::AffineQHessian{AP,M,N,Φ}, b, maxshift, x0)
+    objective = InitialDefOpt(P, b)
+    solver = IpoptSolver(hessian_approximation="limited-memory",
+                         print_level=0)
+    m = SolverInterface.model(solver)
+    T = eltype(b)
+    n = length(b)
+    ub1 = T[maxshift...] - T(0.5001)
+    ub = repeat(ub1, outer=[div(n, length(maxshift))])
+    SolverInterface.loadnonlinearproblem!(m, n, 0, -ub, ub, T[], T[], :Min, objective)
+    SolverInterface.setwarmstart!(m, x0)
+    SolverInterface.optimize!(m)
+    stat = SolverInterface.status(m)
+    stat == :Optimal || warn("Solution was not optimal")
+    SolverInterface.getsolution(m)
+end
+
+# We omit the constant term ∑_i cs[i]'*Qs[i]*cs[i], since it won't
+# affect the solution
+SolverInterface.eval_f(d::InitialDefOpt, x::AbstractVector) =
+    _eval_f(d.P, d.b, x)
+
+function _eval_f{T,N}(P::AffineQHessian{AffinePenalty{T,N}}, b, x::AbstractVector)
+    gridsize = size(P.Qs)
+    n = prod(gridsize)
+    u  = convert_to_fixed(x, (N,gridsize...))# reinterpret(Vec{N,T}, x, gridsize)
+    bf = convert_to_fixed(b, (N,gridsize...))# reinterpret(Vec{N,T}, b, gridsize)
+    λ = P.ap.λ
+    P.ap.λ = λ*n/2
+    val = affine_part!(nothing, P, u)
+    P.ap.λ = λ
+    for i = 1:n
+        val += ((u[i]' * P.Qs[i] * u[i])/2 - bf[i]'*u[i])[1]
+    end
+    val
+end
+
+function SolverInterface.eval_grad_f(d::InitialDefOpt, grad_f, x)
+    P, b = d.P, d.b
+    copy!(grad_f, P*x-b)
+end
+
+function affine_part!{AP,M,N,Φ<:GridDeformation}(g, P::AffineQHessian{AP,M,N,Φ}, u)
+    ϕ_c, g_c = compose(P.ϕ_old, GridDeformation(u, P.ϕ_old.knots))
+    penalty!(g, P.ap, ϕ_c, g_c)
+end
+
+function affine_part!{AP,M,N,Φ<:GridDeformation}(::Void, P::AffineQHessian{AP,M,N,Φ}, u)
+    # Sadly, with GradientNumbers this gives an error I haven't traced
+    # down (might be a Julia bug)
+    # ϕ_c = P.ϕ_old(GridDeformation(u, P.ϕ_old.knots))
+    # penalty!(nothing, P.ap, ϕ_c)
+    u_c = RegisterDeformation._compose(P.ϕ_old.u, u, P.ϕ_old.knots)
+    penalty!(nothing, P.ap, u_c)
 end
 
 ###

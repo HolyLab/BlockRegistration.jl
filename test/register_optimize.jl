@@ -30,14 +30,19 @@ function initial_guess_direct(A, cs, Qs)
     reinterpret(Vec{2,Float64}, x, gridsize)
 end
 
+function build_A(knots, λ)
+    ap = AffinePenalty(knots, λ)
+    FF = ap.F*ap.F'
+    nA = 2*size(FF,1)
+    FF2 = zeros(nA,nA)
+    FF2[1:2:end,1:2:end] = FF
+    FF2[2:2:end,2:2:end] = FF
+    A = ap.λ*(I - FF2)
+    A, ap
+end
+
 knots = (linspace(1,20,4),linspace(1,15,4))
-ap = AffinePenalty(knots, 1.0)
-FF = ap.F*ap.F'
-nA = 2*size(FF,1)
-FF2 = zeros(nA,nA)
-FF2[1:2:end,1:2:end] = FF
-FF2[2:2:end,2:2:end] = FF
-A = ap.λ*(I - FF2)
+A, ap = build_A(knots, 1.0)
 gridsize = map(length, knots)
 Qs = Array(Any, gridsize)
 cs = Array(Any, gridsize)
@@ -72,6 +77,66 @@ u = RegisterOptimize.initial_deformation(ap, cs, Qs)
 for I in eachindex(u)
     @test_approx_eq u[I] ux[I]
 end
+
+# # With composition
+# # We use a larger grid because the edges are suspect
+# arraysize = (100,80)
+# gridsize = (7,6)
+# knots = (linspace(1,arraysize[1],gridsize[1]),linspace(1,arraysize[2],gridsize[2]))
+# A, ap = build_A(knots, 1.0)
+# Qs = Array(Any, gridsize)
+# cs = Array(Any, gridsize)
+# for I in CartesianRange(gridsize)
+#     QF = rand(2,2)
+#     Qs[I] = QF'*QF
+#     cs[I] = randn(2)
+# end
+# ux = initial_guess_direct(A, cs, Qs)
+# # First, a trivial deformation
+# u_old = zeros(2, gridsize...)
+# ϕ_old = interpolate(GridDeformation(u_old, knots))
+# u = RegisterOptimize.initial_deformation(ap, cs, Qs, ϕ_old, (10,10))
+# ϕ_c = ϕ_old(GridDeformation(u, knots))
+# for I in eachindex(ux)
+#     @test_approx_eq ϕ_c.u[I] ux[I]
+# end
+
+
+# # We build a ϕ_old that varies quadratically, so interpolation will be
+# # precise
+# m = maximum(mapreduce(abs, max, ux))
+# Qold1 = rand(2,2); Qold1 = Qold1'*Qold1
+# u1 = quadratic(gridsize..., (0,0), Qold1)
+# u1 *= m/maxabs(u1)  # make sure it's of commensurate size
+# Qold2 = rand(2,2); Qold2 = Qold2'*Qold2
+# u2 = quadratic(gridsize..., (1,-1), Qold2)
+# u2 *= m/maxabs(u2)
+# u_old = permutedims(cat(3, u1, u2), (3, 1, 2))
+# tfm = tformrotate(pi/12)
+# ϕ_old = interpolate(tform2deformation(tfm, arraysize, gridsize))
+# Transform the cs and Qs
+# csi = similar(cs)
+# Qsi = similar(Qs)
+# arrayc = [map(x->(x+1)/2, arraysize)...]
+# for (i,knot) in enumerate(eachknot(knots))
+#     x = convert(Vector, knot) + cs[i] - arrayc
+#     csi[i] = tfm\x - x
+#     Qsi[i] = tfm.scalefwd*Qs[i]*tfm.scalefwd'
+# end
+# u = RegisterOptimize.initial_deformation(ap, csi, Qsi, ϕ_old, (10,10))
+# # Test gradients:
+# import MathProgBase: SolverInterface
+# b = RegisterOptimize.prep_b(Float64, cs, Qs)
+# P = RegisterOptimize.AffineQHessian(ap, Qs, ϕ_old)
+# objective = RegisterOptimize.InitialDefOpt(P, b)
+# fdgrad = ForwardDiff.gradient(x->SolverInterface.eval_f(objective, x))
+# error("stop")
+# @test size(u) == size(ux)
+# @test eltype(u) == Vec{2,Float64}
+# ϕ_c = ϕ_old(GridDeformation(u, knots))
+# for I in eachindex(ux)
+#     @test_approx_eq ϕ_c.u[I] ux[I]
+# end
 
 
 ###
