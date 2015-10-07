@@ -118,22 +118,39 @@ end
 #     end
 # end
 
-function displaymismatch(mms; thresh = 0, totaldenom::Bool = false, clim=:auto, umin = nothing, ucmp = nothing)
+function displaymismatch(mms; thresh = 0, totaldenom::Bool = false, clim=:shared, umin = nothing, ucmp = nothing)
     gridsize = size(mms)
     nd = length(gridsize)
     nd == 2 || error("Cannot display grid of $nd dimensions")
     nblocks = prod(gridsize)
     cgrid = canvasgrid(gridsize)
-    D = zeros(size(first(mms)))
+    local D
     if totaldenom
+        D = zeros(size(first(mms)))
         for j = 1:gridsize[2], i = 1:gridsize[1]
-            D += getblock(denoms, i, j)
+            _, denom = separate(mms[i,j])
+            D += denom
         end
         D /= nblocks
+        function ratioD(mm)
+            num, _ = separate(mm)
+            r = num./D
+            r[D .< thresh] = NaN
+            r
+        end
+        rs = map(mm->ratioD(mm), mms)
+    else
+        rs = map(mm->ratio(mm, thresh), mms)
+    end
+    local mx
+    if clim == :shared
+        mx = mapreduce(maxfinite, max, zero(eltype(first(rs))), rs)
     end
     for j = 1:gridsize[2], i = 1:gridsize[1]
-        r = ratio(mms[i,j], thresh)
-        if clim == :auto
+        r = rs[i,j]
+        if clim == :shared
+            cl = (0,mx)
+        elseif clim == :separate
             cl = (0,maxfinite(r))
         else
             cl = clim
