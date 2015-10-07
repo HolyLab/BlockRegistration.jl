@@ -5,7 +5,7 @@ module RegisterFit
 using AffineTransforms, Interpolations, FixedSizeArrays, NLsolve
 using RegisterPenalty, RegisterCore, CenterIndexedArrays
 
-import Base: @nloops, @nexprs, @nref
+using Base: @nloops, @nexprs, @nref, @nif
 
 export
     mismatch2affine,
@@ -208,6 +208,11 @@ function uclamp!{T<:Number}(u::AbstractArray{T}, maxshift)
     u
 end
 
+function uclamp!{T<:FixedArray}(u::AbstractArray{T}, maxshift)
+    uclamp!(reinterpret(eltype(T), u, (length(T), size(u)...)), maxshift)
+    u
+end
+
 """
 `center, cov = principalaxes(img)` computes the principal axes of an
 image `img`.  `center` is the centroid of intensity, and `cov` the
@@ -313,7 +318,7 @@ end
 
 #### Low-level utilities
 
-@generated function qfit_core!{T,N}(dE::Array{T,2}, V4::Array{T,2}, C::Array{T,4}, mm::Array{NumDenom{T},N}, thresh, umin::NTuple{N,Int}, E0)
+@generated function qfit_core!{T,N}(dE::Array{T,2}, V4::Array{T,2}, C::Array{T,4}, mm::Array{NumDenom{T},N}, thresh, umin::NTuple{N,Int}, E0, maxsep::NTuple{N,Int})
     # The cost of generic matrix-multiplies is too high, so we write
     # these out by hand.
     quote
@@ -321,6 +326,7 @@ end
         @nexprs $N d->(umin_d = umin[d])
         @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 = zero(T)))))
         @nloops $N i mm begin
+            @nif $(N+1) d->(abs(i_d-umin[d]) > maxsep[d]) d->(continue) d->nothing
             nd = @nref $N mm i
             num, den = nd.num, nd.denom
             if den > thresh
@@ -349,17 +355,23 @@ end
 end
 
 """
-`E0, u0, Q = qfit(mm, thresh)` performs a quadratic fit of the
-mismatch data in `mm`.  On output, `u0` and `E0` hold the position and
-value, respectively, of the shift with smallest mismatch, and `Q` is a
-matrix representing the best fit to a model
+`E0, u0, Q = qfit(mm, thresh; [maxsep=size(mm), opt=true])` performs a
+quadratic fit of the mismatch data in `mm`.  On output, `u0` and `E0`
+hold the position and value, respectively, of the shift with smallest
+mismatch, and `Q` is a matrix representing the best fit to a model
+
 ```
     mm ≈ E0 + (u-u0)'*Q*(u-u0)
 ```
 Only those shift-locations with `mm[i].denom > thresh` are used in
 performing the fit.
+
+`maxsep` allows you to restrict the fit to a region where each
+coordinate satisfies `|u[d]-u0[d]| <= maxsep[d]`. If `opt` is false,
+`Q` is a heuristic estimate of the best-fit `Q`. This can boost
+performance at the cost of accuracy.
 """
-function qfit(mm::MismatchArray, thresh::Real)
+function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
     T = eltype(eltype(mm))
     threshT = convert(T, thresh)
     d = ndims(mm)
@@ -381,23 +393,24 @@ function qfit(mm::MismatchArray, thresh::Real)
     umin = ind2sub(size(mm), imin)  # not yet relative to center
     uout = T[umin...]
     for i = 1:d
-        uout[i] -= size(mm,i)>>1 + 1
+        uout[i] -= (size(mm,i)+1)>>1
     end
     dE = Array(T, d, d)
     V4 = similar(dE)
     C = zeros(T, d, d, d, d)
-    qfit_core!(dE, V4, C, mm.data, thresh, umin, E0)
+    qfit_core!(dE, V4, C, mm.data, thresh, umin, E0, maxsep)
     if all(dE .== 0) || any(diag(V4) .== 0)
         return E0, uout, zeros(eltype(dE), d, d)
     end
     # Initial guess for Q
-    M = real(sqrtm(V4))
+    M = real(sqrtm(V4))::Matrix{T}
     # Compute M\dE/M carefully:
     U, s, V = svd(M)
     s1 = s[1]
     sinv = T[v < sqrt(eps(T))*s1 ? zero(T) : 1/v for v in s]
     Minv = V*scale(sinv, U')
     Q = Minv*dE*Minv
+    opt || return E0, uout, Q
     local QL
     try
         QL = full(chol(Q, Val{:L}))
@@ -405,7 +418,7 @@ function qfit(mm::MismatchArray, thresh::Real)
         if isa(err, LinAlg.PosDefException)
             warn("Fixing positive-definite exception:")
             @show V4 dE M Q
-            QL = full(chol(Q+0.001*mean(diag(Q))*I, Val{:L}))
+            QL = full(chol(Q+T(0.001)*mean(diag(Q))*I, Val{:L}))
         else
             rethrow(err)
         end
@@ -419,7 +432,13 @@ function qfit(mm::MismatchArray, thresh::Real)
             x[indx+=1] = QL[i,j]
         end
     end
-    results = nlsolve((x,fx)->QLerr!(x, fx, C, dE, similar(QL)), (x,gx)->QLjac!(x, gx, C, similar(QL)), x)
+    local results
+    try
+        results = nlsolve((x,fx)->QLerr!(x, fx, C, dE, similar(QL)), (x,gx)->QLjac!(x, gx, C, similar(QL)), x)
+    catch err
+        @show C dE QL x
+        rethrow(err)
+    end
     unpackL!(QL, results.zero)
     E0, uout, QL'*QL
 end

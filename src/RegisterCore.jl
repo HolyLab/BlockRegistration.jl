@@ -4,7 +4,7 @@ module RegisterCore
 
 using CenterIndexedArrays
 using Base.Cartesian: @nloops, @nref, @ntuple
-using Images
+using Images, ColorTypes
 
 import Base: +, -, *, /
 import Base: eltype, getindex, ndims, pointer, setindex!, show, size
@@ -189,6 +189,9 @@ immutable NumDenom{T<:Number}
     num::T
     denom::T
 end
+NumDenom(n::Gray, d::Gray) = NumDenom(gray(n), gray(d))
+NumDenom(n::Gray, d) = NumDenom(gray(n), d)
+NumDenom(n, d::Gray) = NumDenom(n, gray(d))
 NumDenom(n, d) = NumDenom(promote(n, d)...)
 
 (+)(p1::NumDenom, p2::NumDenom) = NumDenom(p1.num+p2.num, p1.denom+p2.denom)
@@ -228,15 +231,19 @@ function Base.call{M<:MismatchArray}(::Type{M}, num::AbstractArray, denom::Abstr
 end
 
 function _packnd!(numdenom::AbstractArray, num::AbstractArray, denom::AbstractArray)
-    @simd for I in eachindex(num)
-        @inbounds numdenom[I] = NumDenom(num[I], denom[I])
-    end
-    numdenom
-end
-
-function _packnd!(numdenom::CenterIndexedArray, num::AbstractArray, denom::AbstractArray)
-    @simd for I in eachindex(num)
-        @inbounds numdenom.data[I] = NumDenom(num[I], denom[I])
+    Rnd, Rnum, Rdenom = eachindex(numdenom), eachindex(num), eachindex(denom)
+    if Rnum == Rdenom
+        for (Idest, Isrc) in zip(Rnd, Rnum)
+            @inbounds numdenom[Idest] = NumDenom(num[Isrc], denom[Isrc])
+        end
+    elseif Rnd == Rnum
+        for (Inum, Idenom) in zip(Rnum, Rdenom)
+            @inbounds numdenom[Inum] = NumDenom(num[Inum], denom[Idenom])
+        end
+    else
+        for (Ind, Inum, Idenom) in zip(Rnd, Rnum, Rdenom)
+            @inbounds numdenom[Ind] = NumDenom(num[Inum], denom[Idenom])
+        end
     end
     numdenom
 end
@@ -376,6 +383,12 @@ arrays.
         end
         CartesianIndex(imin)
     end
+end
+
+function indmin_mismatch{T<:Number}(r::CenterIndexedArray{T})
+    ind = ind2sub(size(r), indmin(r.data))
+    indctr = map(d->ind[d]-(size(r,d)+1)>>1, (1:ndims(r)...))
+    CartesianIndex(indctr)
 end
 
 end

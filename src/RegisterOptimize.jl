@@ -4,12 +4,31 @@ module RegisterOptimize
 
 using MathProgBase, Ipopt, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers
 using RegisterCore, RegisterDeformation, RegisterMismatch, RegisterPenalty
+using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base.Test
 
 import Base: *
-import MathProgBase: MathProgSolverInterface
+import MathProgBase: SolverInterface
 
-abstract GradOnly <: MathProgSolverInterface.AbstractNLPEvaluator
+# Some conveniences for MathProgBase
+abstract GradOnly <: SolverInterface.AbstractNLPEvaluator
+
+function SolverInterface.initialize(d::GradOnly, requested_features::Vector{Symbol})
+    for feat in requested_features
+        if !(feat in [:Grad, :Jac])
+            error("Unsupported feature $feat")
+        end
+    end
+end
+SolverInterface.features_available(d::GradOnly) = [:Grad, :Jac]
+
+
+abstract GradOnlyBoundsOnly <: GradOnly
+
+SolverInterface.eval_g(::GradOnlyBoundsOnly, g, x) = nothing
+SolverInterface.jac_structure(::GradOnlyBoundsOnly) = Int[], Int[]
+SolverInterface.eval_jac_g(::GradOnlyBoundsOnly, J, x) = nothing
+
 
 # Some necessary ForwardDiff extensions to make Interpolations work
 Base.real(v::ForwardDiff.GradientNumber) = real(v.value)
@@ -65,16 +84,16 @@ function optimize_rigid(fixed, moving, A::AffineTransform, maxshift, SD = eye(nd
     solver = IpoptSolver(hessian_approximation="limited-memory",
                          print_level=print_level,
                          tol=tol)
-    m = MathProgSolverInterface.model(solver)
+    m = SolverInterface.model(solver)
     ub = T[fill(pi, length(p0)-length(maxshift)); [maxshift...]]
-    MathProgSolverInterface.loadnonlinearproblem!(m, length(p0), 0, -ub, ub, T[], T[], :Min, objective)
-    MathProgSolverInterface.setwarmstart!(m, p0)
-    MathProgSolverInterface.optimize!(m)
+    SolverInterface.loadnonlinearproblem!(m, length(p0), 0, -ub, ub, T[], T[], :Min, objective)
+    SolverInterface.setwarmstart!(m, p0)
+    SolverInterface.optimize!(m)
 
-    stat = MathProgSolverInterface.status(m)
+    stat = SolverInterface.status(m)
     stat == :Optimal || warn("Solution was not optimal")
-    p = MathProgSolverInterface.getsolution(m)
-    fval = MathProgSolverInterface.getobjval(m)
+    p = SolverInterface.getsolution(m)
+    fval = SolverInterface.getobjval(m)
 
     p2rigid(p, SD), fval
 end
@@ -99,7 +118,7 @@ to_float{T}(::Type{T}, A, B) = convert(Array{Float32}, A), convert(Array{Float32
 ###
 ### Rigid registration from raw images, MathProg interface
 ###
-type RigidValue{N,A<:AbstractArray,I<:AbstractExtrapolation,SDT} <: MathProgSolverInterface.AbstractNLPEvaluator
+type RigidValue{N,A<:AbstractArray,I<:AbstractExtrapolation,SDT} <: SolverInterface.AbstractNLPEvaluator
     fixed::A
     wfixed::A
     moving::I
@@ -130,7 +149,7 @@ function Base.call(d::RigidValue, x)
     sumabs2(f-m)/den
 end
 
-type RigidOpt{RV<:RigidValue,G} <: GradOnly
+type RigidOpt{RV<:RigidValue,G} <: GradOnlyBoundsOnly
     rv::RV
     g::G
 end
@@ -141,77 +160,166 @@ function RigidOpt(fixed, moving, SD, thresh)
     RigidOpt(rv, g)
 end
 
-function MathProgSolverInterface.initialize(d::GradOnly, requested_features::Vector{Symbol})
-    for feat in requested_features
-        if !(feat in [:Grad, :Jac])
-            error("Unsupported feature $feat")
-        end
-    end
-end
-MathProgSolverInterface.features_available(d::GradOnly) = [:Grad, :Jac]
-
-MathProgSolverInterface.eval_f(d::RigidOpt, x) = d.rv(x)
-MathProgSolverInterface.eval_g(d::RigidOpt, g, x) = nothing
-MathProgSolverInterface.eval_grad_f(d::RigidOpt, grad_f, x) =
+SolverInterface.eval_f(d::RigidOpt, x) = d.rv(x)
+SolverInterface.eval_grad_f(d::RigidOpt, grad_f, x) =
     copy!(grad_f, d.g(x))
-MathProgSolverInterface.jac_structure(d::RigidOpt) = Int[], Int[]
-MathProgSolverInterface.eval_jac_g(d::RigidOpt, J, x) = nothing
 
 ###
 ### Globally-optimal initial guess for deformation given
 ### quadratic-fit mismatch data
 ###
 """
-`u0 = initial_deformation(dp::AffinePenalty, cs, Qs)` prepares a
-globally-optimal initial guess for a deformation, given a quadratic
-fit to the aperture-wise mismatch data. `cs` and `Qs` must be
-arrays-of-arrays in the shape of the u0-grid, each entry as calculated
-by `qfit`.
+`u0 = initial_deformation(ap::AffinePenalty, cs, Qs;
+[ϕ_old=identity])` prepares a globally-optimal initial guess for a
+deformation, given a quadratic fit to the aperture-wise mismatch
+data. `cs` and `Qs` must be arrays-of-arrays in the shape of the
+u0-grid, each entry as calculated by `qfit`. The initial guess
+minimizes the function
+
+```
+    ap(ϕ(u0)) + ∑_i (u0[i]-cs[i])' * Qs[i] * (u0[i]-cs[i])
+```
+where `ϕ(u0)` is the deformation associated with `u0`.
+
+If `ϕ_old` is not the identity, it must be interpolating.
 """
-function initial_deformation(ap::AffinePenalty, cs, Qs)
-    n = prod(size(Qs))
-    c = first(cs)
-    N = length(c)
-    b = zeros(eltype(c), N*n)
-    for i = 1:n
-        b[(i-1)*N+1:i*N] = Qs[i]*cs[i]
-    end
+function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
+    b = prep_b(T, cs, Qs)
     # In case the grid is really big, solve iteratively
     # (The matrix is not sparse, but matrix-vector products can be
     # computed efficiently.)
-    P = AffineQHessian(ap, Qs)
-    x, _ = cg(P, b)
-    u0 = reinterpret(Vec{N,eltype(x)}, x, size(cs))
+    P = AffineQHessian(ap, Qs, identity)
+    x = find_opt(P, b)
+    u0 = convert_to_fixed(x, (N,size(cs)...)) #reinterpret(Vec{N,eltype(x)}, x, size(cs))
 end
 
-type AffineQHessian{T,QA}
-    ap::AffinePenalty{T}
-    Qs::QA
+function prep_b{T}(::Type{T}, cs, Qs)
+    n = prod(size(Qs))
+    N = length(first(cs))
+    b = zeros(T, N*n)
+    for i = 1:n
+        b[(i-1)*N+1:i*N] = Qs[i]*cs[i]
+    end
+    b
 end
 
-Base.eltype{T,QA}(::Type{AffineQHessian{T,QA}}) = T
+function find_opt(P, b)
+    x, result = cg(P, b)
+    @assert result.isconverged
+    x
+end
+
+# A type for computing multiplication by the linear operator
+type AffineQHessian{AP<:AffinePenalty,M<:Mat,N,Φ}
+    ap::AP
+    Qs::Array{M,N}
+    ϕ_old::Φ
+end
+
+function AffineQHessian(ap::AffinePenalty, Qs::AbstractArray, ϕ_old)
+    T = eltype(first(Qs))
+    N = ndims(Qs)
+    AffineQHessian{typeof(ap),Mat{N,N,T},N,typeof(ϕ_old)}(ap, Qs, ϕ_old)
+end
+
+Base.eltype{AP,M,N,Φ}(::Type{AffineQHessian{AP,M,N,Φ}}) = eltype(AP)
+Base.eltype(P::AffineQHessian) = eltype(typeof(P))
 Base.size(P::AffineQHessian, d) = length(P.Qs)*size(first(P.Qs),1)
 
-function (*)(P::AffineQHessian, x::AbstractVector)
+# These compute the gradient of (x'*P*x)/2, where P is the Hessian
+# for the objective in the doc text for initial_deformation.
+function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     gridsize = size(P.Qs)
     n = prod(gridsize)
-    N = size(first(P.Qs), 1)
-    U = reshape(x, N, n)
-    F = P.ap.F
-    A = (U*F)*F'
-    g = P.ap.λ*(U-A)
-    u = Array(eltype(U), N)
-    Qu = similar(u)
+    u = convert_to_fixed(x, (N,gridsize...)) #reinterpret(Vec{N,T}, x, gridsize)
+    g = similar(u)
+    λ = P.ap.λ
+    P.ap.λ = λ*n/2
+    affine_part!(g, P, u)
+    P.ap.λ = λ
     for i = 1:n
-        for d = 1:N
-            u[d] = U[d,i]
-        end
-        A_mul_B!(Qu, P.Qs[i], u)
-        for d = 1:N
-            g[(i-1)*N+d] += Qu[d]
-        end
+        g[i] += P.Qs[i] * u[i]
     end
-    vec(g)
+    reinterpret(T, g, size(x))
+end
+
+affine_part!(g, P, u) = penalty!(g, P.ap, u)
+
+
+function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs, ϕ_old, maxshift)
+    error("This is broken, don't use it")
+    b = prep_b(T, cs, Qs)
+    # In case the grid is really big, solve iteratively
+    # (The matrix is not sparse, but matrix-vector products can be
+    # computed efficiently.)
+    P0 = AffineQHessian(ap, Qs, identity)
+    x0 = find_opt(P0, b)
+    P = AffineQHessian(ap, Qs, ϕ_old)
+    x = find_opt(P, b, maxshift, x0)
+    u0 = convert_to_fixed(x, (N,size(cs)...)) #reinterpret(Vec{N,eltype(x)}, x, size(cs))
+end
+
+# type for minimization with composition (which turns the problem into
+# a nonlinear problem)
+type InitialDefOpt{AQH,B} <: GradOnlyBoundsOnly
+    P::AQH
+    b::B
+end
+
+function find_opt{AP,M,N,Φ<:GridDeformation}(P::AffineQHessian{AP,M,N,Φ}, b, maxshift, x0)
+    objective = InitialDefOpt(P, b)
+    solver = IpoptSolver(hessian_approximation="limited-memory",
+                         print_level=0)
+    m = SolverInterface.model(solver)
+    T = eltype(b)
+    n = length(b)
+    ub1 = T[maxshift...] - T(0.5001)
+    ub = repeat(ub1, outer=[div(n, length(maxshift))])
+    SolverInterface.loadnonlinearproblem!(m, n, 0, -ub, ub, T[], T[], :Min, objective)
+    SolverInterface.setwarmstart!(m, x0)
+    SolverInterface.optimize!(m)
+    stat = SolverInterface.status(m)
+    stat == :Optimal || warn("Solution was not optimal")
+    SolverInterface.getsolution(m)
+end
+
+# We omit the constant term ∑_i cs[i]'*Qs[i]*cs[i], since it won't
+# affect the solution
+SolverInterface.eval_f(d::InitialDefOpt, x::AbstractVector) =
+    _eval_f(d.P, d.b, x)
+
+function _eval_f{T,N}(P::AffineQHessian{AffinePenalty{T,N}}, b, x::AbstractVector)
+    gridsize = size(P.Qs)
+    n = prod(gridsize)
+    u  = convert_to_fixed(x, (N,gridsize...))# reinterpret(Vec{N,T}, x, gridsize)
+    bf = convert_to_fixed(b, (N,gridsize...))# reinterpret(Vec{N,T}, b, gridsize)
+    λ = P.ap.λ
+    P.ap.λ = λ*n/2
+    val = affine_part!(nothing, P, u)
+    P.ap.λ = λ
+    for i = 1:n
+        val += ((u[i]' * P.Qs[i] * u[i])/2 - bf[i]'*u[i])[1]
+    end
+    val
+end
+
+function SolverInterface.eval_grad_f(d::InitialDefOpt, grad_f, x)
+    P, b = d.P, d.b
+    copy!(grad_f, P*x-b)
+end
+
+function affine_part!{AP,M,N,Φ<:GridDeformation}(g, P::AffineQHessian{AP,M,N,Φ}, u)
+    ϕ_c, g_c = compose(P.ϕ_old, GridDeformation(u, P.ϕ_old.knots))
+    penalty!(g, P.ap, ϕ_c, g_c)
+end
+
+function affine_part!{AP,M,N,Φ<:GridDeformation}(::Void, P::AffineQHessian{AP,M,N,Φ}, u)
+    # Sadly, with GradientNumbers this gives an error I haven't traced
+    # down (might be a Julia bug)
+    # ϕ_c = P.ϕ_old(GridDeformation(u, P.ϕ_old.knots))
+    # penalty!(nothing, P.ap, ϕ_c)
+    u_c = RegisterDeformation._compose(P.ϕ_old.u, u, P.ϕ_old.knots)
+    penalty!(nothing, P.ap, u_c)
 end
 
 ###
@@ -233,17 +341,19 @@ function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_lev
     solver = IpoptSolver(hessian_approximation="limited-memory",
                          print_level=print_level,
                          tol=tol)
-    m = MathProgSolverInterface.model(solver)
+    m = SolverInterface.model(solver)
     ub1 = T[mxs...] - T(0.5001)
     ub = repeat(ub1, outer=[length(ϕ.u)])
-    MathProgSolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
-    MathProgSolverInterface.setwarmstart!(m, uvec)
-    MathProgSolverInterface.optimize!(m)
+    SolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
+    SolverInterface.setwarmstart!(m, uvec)
+    val0 = SolverInterface.eval_f(objective, uvec)
+    isfinite(val0) || error("Initial value must be finite")
+    SolverInterface.optimize!(m)
 
-    stat = MathProgSolverInterface.status(m)
+    stat = SolverInterface.status(m)
     stat == :Optimal || warn("Solution was not optimal")
-    uopt = MathProgSolverInterface.getsolution(m)
-    fval = MathProgSolverInterface.getobjval(m)
+    uopt = SolverInterface.getsolution(m)
+    fval = SolverInterface.getobjval(m)
     copy!(uvec, uopt)
     ϕ, fval
 end
@@ -258,29 +368,24 @@ function vec_as_u{T,N}(g::Array{T}, ϕ::GridDeformation{T,N})
     reinterpret(Vec{N,T}, g, size(ϕ.u))
 end
 
-type DeformOpt{D,Dold,DP,M} <: GradOnly
+type DeformOpt{D,Dold,DP,M} <: GradOnlyBoundsOnly
     ϕ::D
     ϕ_old::Dold
     dp::DP
     mmis::M
 end
 
-function MathProgSolverInterface.eval_f(d::DeformOpt, x)
+function SolverInterface.eval_f(d::DeformOpt, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(nothing, d.ϕ, d.ϕ_old, d.dp, d.mmis)
 end
 
-MathProgSolverInterface.eval_g(d::DeformOpt, g, x) = nothing
-
-function MathProgSolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
+function SolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(vec_as_u(grad_f, d.ϕ), d.ϕ, d.ϕ_old, d.dp, d.mmis)
 end
-
-MathProgSolverInterface.jac_structure(d::DeformOpt) = Int[], Int[]
-MathProgSolverInterface.eval_jac_g(d::DeformOpt, J, x) = nothing
 
 ###
 ### Mismatch-based optimization of affine transformation

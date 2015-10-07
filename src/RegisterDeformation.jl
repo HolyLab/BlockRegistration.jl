@@ -136,17 +136,40 @@ function GridDeformation{N}(u::NTuple{N}, knots::NTuple{N})
     GridDeformation(uf, knots)
 end
 
-function convert_to_fixed{T}(u::Array{T})
-    N = size(u,1)
+function convert_to_fixed{T}(u::Array{T}, sz=size(u))
+    N = sz[1]
     if isbits(T)
-        uf = reinterpret(Vec{N,T}, u, Base.tail(size(u)))
+        uf = reinterpret(Vec{N,T}, u, Base.tail(sz))
     else
-        uf = Array(Vec{N,T}, Base.tail(size(u)))
-        for i = 1:length(uf)
-            uf[i] = Vec(u[:,i]...)
-        end
+        uf = Array(Vec{N,T}, Base.tail(sz))
+        copy_ctf!(uf, u)
     end
     uf
+end
+
+@generated function copy_ctf!{N,T}(dest::Array{Vec{N,T}}, src::Array)
+    exvec = [:(src[offset+$d]) for d=1:N]
+    quote
+        for i = 1:length(dest)
+            offset = (i-1)*N
+            dest[i] = Vec($(exvec...))
+        end
+        dest
+    end
+end
+
+function convert_from_fixed{N,T}(uf::Array{Vec{N,T}}, sz=size(uf))
+    if isbits(T)
+        u = reinterpret(T, uf, (N, sz...))
+    else
+        u = Array(T, (N, sz...))
+        for i = 1:length(uf)
+            for d = 1:N
+                u[d,i] = uf[i][d]
+            end
+        end
+    end
+    u
 end
 
 function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV})
@@ -196,23 +219,31 @@ end
 # Composition ϕ_old(ϕ_new(x))
 function Base.call{T1,T2,N,A<:AbstractInterpolation}(
         ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
-    u, knots = ϕ_old.u, ϕ_old.knots
+    uold, knots = ϕ_old.u, ϕ_old.knots
     if !isa(ϕ_new.u, AbstractInterpolation)
         ϕ_new.knots == knots || error("If knots are incommensurate, ϕ_new must be interpolating")
     end
-    sz = map(length, knots)
-    x = knot(knots, 1)
-    out = _compose(u, ϕ_new, x, 1)
-    ucomp = similar(u, typeof(out))
-    for I in CartesianRange(sz)
-        ucomp[I] = _compose(u, ϕ_new, knot(knots, I), I)
-    end
+    ucomp = _compose(uold, ϕ_new.u, knots)
     GridDeformation(ucomp, knots)
 end
 
-function _compose(u, ϕ_new, x, i)
-    dx = lookup(ϕ_new.u, x, i)
-    dx + vecindex(u, x+dx)
+Base.call(ϕ_old::GridDeformation, ϕ_new::GridDeformation) =
+    error("ϕ_old must be interpolating")
+
+function _compose(uold, unew, knots)
+    sz = map(length, knots)
+    x = knot(knots, 1)
+    out = _compose(uold, unew, x, 1)
+    ucomp = similar(uold, typeof(out))
+    for I in CartesianRange(sz)
+        ucomp[I] = _compose(uold, unew, knot(knots, I), I)
+    end
+    ucomp
+end
+
+function _compose(uold, unew, x, i)
+    dx = lookup(unew, x, i)
+    dx + vecindex(uold, x+dx)
 end
 
 lookup(u::AbstractInterpolation, x, i) = vecindex(u, x)
@@ -250,7 +281,8 @@ end
 
 """
 `ϕ_c = ϕ_old(ϕ_new)` computes the composition of two deformations,
-yielding a deformation for which `ϕ_c(x) ≈ ϕ_old(ϕ_new(x))`.
+yielding a deformation for which `ϕ_c(x) ≈ ϕ_old(ϕ_new(x))`. `ϕ_old`
+must be interpolating (see `interpolate(ϕ_old)`).
 
 `ϕ_c, g = compose(ϕ_old, ϕ_new)` also yields the gradient `g` of `ϕ_c`
 with respect to `u_new`.  `g[i,j,...]` is the Jacobian matrix at grid
@@ -263,9 +295,10 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(
         ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
     u, knots = ϕ_old.u, ϕ_old.knots
     ϕ_new.knots == knots || error("Not yet implemented for incommensurate knots")
+    unew = ϕ_new.u
     sz = map(length, knots)
     x = knot(knots, 1)
-    out = _compose(u, ϕ_new, x, 1)
+    out = _compose(u, unew, x, 1)
     ucomp = similar(u, typeof(out))
     TG = Mat{N,N,eltype(out)}
     g = Array(TG, size(u))
@@ -273,7 +306,7 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(
     eyeN = eye(TG)
     for I in CartesianRange(sz)
         x = knot(knots, I)
-        dx = lookup(ϕ_new.u, x, I)
+        dx = lookup(unew, x, I)
         y = x + dx
         ucomp[I] = dx + vecindex(u, y)
         vecgradient!(gtmp, u, y)
@@ -439,20 +472,34 @@ function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ϕ)
 end
 
 """
-`img = warpgrid(ϕ)` returns an image `img` that permits visualization
-of the deformation `ϕ`.  The output is a warped rectangular grid with
-nodes centered on the control points as specified by the knots of `ϕ`.
+
+`img = warpgrid(ϕ; [scale=1, showidentity=false])` returns an image
+`img` that permits visualization of the deformation `ϕ`.  The output
+is a warped rectangular grid with nodes centered on the control points
+as specified by the knots of `ϕ`.
+
+`scale` multiplies `ϕ.u`, effectively making the deformation stronger
+(for `scale > 1`).  This can be useful if you are trying to visualize
+subtle changes. If `showidentity` is `true`, the actual deformation is
 """
-function warpgrid(ϕ)
+function warpgrid(ϕ; scale=1, showidentity::Bool=false)
     imsz = map(x->convert(Int, last(x)), ϕ.knots)
-    img = zeros(eltype(u), imsz)
+    img = zeros(Float32, imsz)
     imsza = Any[imsz...]
     for idim = 1:ndims(img)
         indexes = map(s -> 1:s, imsza)
-        indexes[idim] = round(Int, ϕ.knots[idim])
+        indexes[idim] = clamp(round(Int, ϕ.knots[idim]), 2, imsz[idim]-1)
         img[indexes...] = 1
     end
-    warp(img, ϕ)
+    if scale != 1
+        ϕ = GridDeformation(scale*ϕ.u, ϕ.knots)
+    end
+    wimg = warp(img, ϕ)
+    if showidentity
+        n = ndims(img)+1
+        return reinterpret(RGB{Float32}, permutedims(cat(n, wimg, img, wimg), (n,1:ndims(img)...)))
+    end
+    wimg
 end
 
 # TODO?: do we need to return real values beyond-the-edge for a SubArray?

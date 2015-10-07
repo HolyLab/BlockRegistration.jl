@@ -9,7 +9,7 @@ include("register_test_utilities.jl")
 denom = ones(11,11)
 Q = rand(2,2); Q = Q'*Q
 num = quadratic(11, 11, [1,-2], Q)
-E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), 1e-3)
+E0, cntr, Qf = @inferred(RegisterFit.qfit(MismatchArray(num, denom), 1e-3))
 @test abs(E0) < eps()
 @test_approx_eq cntr [1,-2]
 @test_approx_eq Qf Q
