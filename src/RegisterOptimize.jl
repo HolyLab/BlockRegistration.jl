@@ -245,6 +245,8 @@ function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_lev
     ub = repeat(ub1, outer=[length(ϕ.u)])
     SolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
     SolverInterface.setwarmstart!(m, uvec)
+    val0 = SolverInterface.eval_f(objective, uvec)
+    isfinite(val0) || error("Initial value must be finite")
     SolverInterface.optimize!(m)
 
     stat = SolverInterface.status(m)
