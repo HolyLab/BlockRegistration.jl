@@ -385,4 +385,10 @@ arrays.
     end
 end
 
+function indmin_mismatch{T<:Number}(r::CenterIndexedArray{T})
+    ind = ind2sub(size(r), indmin(r.data))
+    indctr = map(d->ind[d]-(size(r,d)+1)>>1, (1:ndims(r)...))
+    CartesianIndex(indctr)
+end
+
 end
