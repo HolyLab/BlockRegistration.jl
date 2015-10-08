@@ -360,28 +360,34 @@ end
 ### Optimize (via descent) a deformation to mismatch data
 ###
 """
-`ϕ, fval = optimize!(ϕ, ϕ_old, dp, mmis; [tol=1e-4, print_level=0])`
+`ϕ, fval, fval0 = optimize!(ϕ, ϕ_old, dp, mmis; [tol=1e-4, print_level=0])`
 improves an initial deformation `ϕ` to reduce the mismatch.  The
 arguments are as described for `penalty!` in RegisterPenalty.  On
-output, `ϕ` is set in-place to the new optimized deformation, and
-`fval` is the value of the penalty.
+output, `ϕ` is set in-place to the new optimized deformation,
+`fval` is the value of the penalty, and `fval0` was the starting value.
+
+It's recommended that you verify that `fval < fval0`; if it's not
+true, consider adding `mu_strategy="monotone", mu_init=??` to the
+options (where the value of ?? might require some experimentation; a
+starting point might be 1e-4).
+
 """
-function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_level=0)
+function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_level=0, kwargs...)
     objective = DeformOpt(ϕ, ϕ_old, dp, mmis)
     uvec = u_as_vec(ϕ)
     T = eltype(uvec)
     mxs = maxshift(first(mmis))
 
-    solver = IpoptSolver(hessian_approximation="limited-memory",
+    solver = IpoptSolver(;hessian_approximation="limited-memory",
                          print_level=print_level,
-                         tol=tol)
+                         tol=tol, kwargs...)
     m = SolverInterface.model(solver)
     ub1 = T[mxs...] - T(0.5001)
     ub = repeat(ub1, outer=[length(ϕ.u)])
     SolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
     SolverInterface.setwarmstart!(m, uvec)
-    val0 = SolverInterface.eval_f(objective, uvec)
-    isfinite(val0) || error("Initial value must be finite")
+    fval0 = SolverInterface.eval_f(objective, uvec)
+    isfinite(fval0) || error("Initial value must be finite")
     SolverInterface.optimize!(m)
 
     stat = SolverInterface.status(m)
@@ -389,7 +395,7 @@ function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_lev
     uopt = SolverInterface.getsolution(m)
     fval = SolverInterface.getobjval(m)
     copy!(uvec, uopt)
-    ϕ, fval
+    ϕ, fval, fval0
 end
 
 function u_as_vec(ϕ)
