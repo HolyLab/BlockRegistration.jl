@@ -45,7 +45,7 @@ num = quadratic(13, 11, [2,-4], Q)
 E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 @test abs(E0) < eps()
 @test abs(dot(cntr-[2,-4], a)) < eps()
-@test_approx_eq Qf Q
+@test_approx_eq_eps Qf Q 1e-12
 
 # Settings with very few above-threshold data points
 # Just make sure there are no errors

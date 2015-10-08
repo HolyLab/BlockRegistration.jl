@@ -56,12 +56,14 @@ for (i,knot) in enumerate(eachknot(knots))
 end
 ux = initial_guess_direct(A, cs, Qs)
 #u = @inferred(RegisterOptimize.initial_guess(ap, cs, Qs))
-u = RegisterOptimize.initial_deformation(ap, cs, Qs)
+u, isconverged = @inferred(RegisterOptimize.initial_deformation(ap, cs, Qs))
+@test isconverged
 @test size(u) == size(ux)
 @test eltype(u) == Vec{2,Float64}
+# The accuracy here is low only because of the diagonal regularization
 for I in eachindex(u)
-    @test_approx_eq u[I] cs[I]
-    @test_approx_eq ux[I] cs[I]
+    @test_approx_eq_eps u[I] cs[I] 1e-3
+    @test_approx_eq_eps ux[I] cs[I] 1e-3
 end
 
 # Random initialization
@@ -71,11 +73,12 @@ for I in CartesianRange(gridsize)
     cs[I] = randn(2)
 end
 ux = initial_guess_direct(A, cs, Qs)
-u = RegisterOptimize.initial_deformation(ap, cs, Qs)
+u, isconverged = RegisterOptimize.initial_deformation(ap, cs, Qs)
+@test isconverged
 @test size(u) == size(ux)
 @test eltype(u) == Vec{2,Float64}
 for I in eachindex(u)
-    @test_approx_eq u[I] ux[I]
+    @test_approx_eq_eps u[I] ux[I] 1e-3
 end
 
 # # With composition

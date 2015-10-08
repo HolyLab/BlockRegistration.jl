@@ -210,7 +210,7 @@ function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
     # computed efficiently.)
     P = AffineQHessian(ap, Qs, identity)
     x, isconverged = find_opt(P, b)
-    convert_to_fixed(x, (N,size(cs)...)), isconverged
+    convert_to_fixed(x, (N,size(cs)...))::Array{Vec{N,T},N}, isconverged
 end
 
 function to_full{T,N}(ap::AffinePenalty{T,N}, Qs)
