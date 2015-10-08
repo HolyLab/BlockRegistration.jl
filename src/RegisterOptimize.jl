@@ -185,12 +185,37 @@ If `ϕ_old` is not the identity, it must be interpolating.
 """
 function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
     b = prep_b(T, cs, Qs)
+    # A = to_full(ap, Qs)
+    # F = svdfact(A)
+    # S = F[:S]
+    # smax = maximum(S)
+    # fac = sqrt(eps(typeof(smax)))
+    # for i = 1:length(S)
+    #     if S[i] < fac*smax
+    #         S[i] = Inf
+    #     end
+    # end
+    # x, isconverged = F\b, true
     # In case the grid is really big, solve iteratively
     # (The matrix is not sparse, but matrix-vector products can be
     # computed efficiently.)
     P = AffineQHessian(ap, Qs, identity)
-    x = find_opt(P, b)
-    u0 = convert_to_fixed(x, (N,size(cs)...)) #reinterpret(Vec{N,eltype(x)}, x, size(cs))
+    x, isconverged = find_opt(P, b)
+    convert_to_fixed(x, (N,size(cs)...)), isconverged
+end
+
+function to_full{T,N}(ap::AffinePenalty{T,N}, Qs)
+    FF = ap.F*ap.F'
+    nA = N*size(FF,1)
+    FFN = zeros(nA,nA)
+    for o = 1:N
+        FFN[o:N:end,o:N:end] = FF
+    end
+    A = ap.λ*(I - FFN)
+    for i = 1:length(Qs)
+        A[N*(i-1)+1:N*i, N*(i-1)+1:N*i] += Qs[i]
+    end
+    A
 end
 
 function prep_b{T}(::Type{T}, cs, Qs)
@@ -205,8 +230,7 @@ end
 
 function find_opt(P, b)
     x, result = cg(P, b)
-    @assert result.isconverged
-    x
+    x, result.isconverged
 end
 
 # A type for computing multiplication by the linear operator
@@ -237,8 +261,18 @@ function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     P.ap.λ = λ*n/2
     affine_part!(g, P, u)
     P.ap.λ = λ
+    sumQ = zero(T)
     for i = 1:n
         g[i] += P.Qs[i] * u[i]
+        sumQ += trace(P.Qs[i])
+    end
+    # Add a stabilizing diagonal, for cases where λ is very small
+    if sumQ == 0
+        sumQ = one(T)
+    end
+    fac = cbrt(eps(T))*sumQ/n
+    for i = 1:n
+        g[i] += fac*u[i]
     end
     reinterpret(T, g, size(x))
 end
