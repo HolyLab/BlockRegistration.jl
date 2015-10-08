@@ -43,8 +43,7 @@ if havecuda
     import RegisterMismatchCuda
     RMlist = (RegisterMismatch,RegisterMismatchCuda)
     devlist = devices(dev->capability(dev)[1] >= 2, nmax=1)
-    mdutils = [CuModule()]
-    CUDArt.init!(mdutils, devlist)
+    CUDArt.init(devlist)
     RegisterMismatchCuda.init(devlist)
 end
 
@@ -187,5 +186,5 @@ mm = RegisterMismatch.mismatch0(A, B)
 
 if havecuda
     RegisterMismatchCuda.close()
-    CUDArt.close!(mdutils, devlist)
+    CUDArt.close(devlist)
 end
