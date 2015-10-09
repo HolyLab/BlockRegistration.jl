@@ -1,4 +1,5 @@
 using Base.Test, RegisterCore
+using Compat
 import CUDArt
 import RegisterMismatchCuda
 
