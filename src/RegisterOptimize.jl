@@ -369,7 +369,7 @@ end
 ### Optimize (via descent) a deformation to mismatch data
 ###
 """
-`ϕ, fval, fval0 = optimize!(ϕ, ϕ_old, dp, mmis; [tol=1e-4, print_level=0])`
+`ϕ, fval, fval0 = optimize!(ϕ, ϕ_old, dp, mmis; [tol=1e-6, print_level=0])`
 improves an initial deformation `ϕ` to reduce the mismatch.  The
 arguments are as described for `penalty!` in RegisterPenalty.  On
 output, `ϕ` is set in-place to the new optimized deformation,
@@ -381,7 +381,7 @@ options (where the value of ?? might require some experimentation; a
 starting point might be 1e-4).
 
 """
-function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_level=0, kwargs...)
+function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-6, print_level=0, kwargs...)
     objective = DeformOpt(ϕ, ϕ_old, dp, mmis)
     uvec = u_as_vec(ϕ)
     T = eltype(uvec)
