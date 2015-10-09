@@ -13,8 +13,8 @@ export
     fillfixed!,
     mismatch,
     mismatch!,
-    mismatch_blocks,
-    mismatch_blocks!
+    mismatch_apertures,
+    mismatch_apertures!
 
 include("RegisterMismatchCommon.jl")
 
@@ -207,8 +207,8 @@ function mismatch_apertures{T}(::Type{T},
                                maxshift::DimsLike;
                                kwargs...)
     assertsamesize(fixed, moving)
-    d_fixed  = CudaPitchedArray(convert(Array{T}, fixed))
-    d_moving = CudaPitchedArray(convert(Array{T}, moving))
+    d_fixed  = CudaPitchedArray(convert(Array{T}, data(fixed)))
+    d_moving = CudaPitchedArray(convert(Array{T}, data(moving)))
     mms = mismatch_apertures(d_fixed, d_moving, aperture_centers, aperture_width, maxshift; kwargs...)
     free(d_fixed)
     free(d_moving)
