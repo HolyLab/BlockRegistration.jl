@@ -21,14 +21,15 @@ function mismatch_apertures{T}(::Type{T}, fixed::AbstractArray, moving::Abstract
 end
 
 """
-`mmc = correctbias!(mm::MismatchArray)` replaces "suspect" mismatch
+`correctbias!(mm::MismatchArray)` replaces "suspect" mismatch
 data with imputed data.  If each pixel in your camera has a different
 bias, then matching that bias becomes an incentive to avoid
 shifts.  Likewise, CMOS cameras tend to have correlated row/column
 noise. These two factors combine to imply that `mm[i,j]` is unreliable
 whenever `i` or `j` is zero.
 
-Data are imputed by averaging the adjacent non-suspect values.
+Data are imputed by averaging the adjacent non-suspect values.  This
+function works in-place, overwriting the original `mm`.
 """
 function correctbias!{ND,N}(mm::MismatchArray{ND,N})
     T = eltype(ND)
@@ -62,6 +63,7 @@ function correctbias!{ND,N}(mm::MismatchArray{ND,N})
     mm
 end
 
+"`correctbias!(mms)` runs `correctbias!` on each element of an array-of-MismatchArrays."
 function correctbias!{M<:MismatchArray}(mms::AbstractArray{M})
     for mm in mms
         correctbias!(mm)
