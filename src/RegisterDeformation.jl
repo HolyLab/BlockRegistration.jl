@@ -210,7 +210,9 @@ end
     length(xs) == N || throw(DimensionMismatch("$(length(xs)) indexes is not consistent with ϕ dimensionality $N"))
     xindexes = [:(xs[$d]) for d = 1:N]
     ϕxindexes = [:(xs[$d]+ux[$d]) for d = 1:N]
+    meta = Expr(:meta, :inline)
     quote
+        $meta
         ux = ϕ.u[$(xindexes...)]
         Vec($(ϕxindexes...))
     end
