@@ -249,8 +249,7 @@ type AffineQHessian{AP<:AffinePenalty,M<:Mat,N,Φ}
     ϕ_old::Φ
 end
 
-function AffineQHessian(ap::AffinePenalty, Qs::AbstractArray, ϕ_old)
-    T = eltype(first(Qs))
+function AffineQHessian{T}(ap::AffinePenalty{T}, Qs::AbstractArray, ϕ_old)
     N = ndims(Qs)
     AffineQHessian{typeof(ap),Mat{N,N,T},N,typeof(ϕ_old)}(ap, Qs, ϕ_old)
 end
@@ -434,6 +433,25 @@ function SolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(vec_as_u(grad_f, d.ϕ), d.ϕ, d.ϕ_old, d.dp, d.mmis)
+end
+
+function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis)
+    maxshift = map(x->(x-1)>>1, size(first(mmis)))
+    u0, isconverged = initial_deformation(ap, cs, Qs)
+    if !isconverged
+        Base.warn_once("initial_deformation failed to converge with λ = ", ap.λ)
+    end
+    uclamp!(u0, maxshift)
+    ϕ = GridDeformation(u0, knots)
+    mu_init = 0.1
+    local mismatch
+    while mu_init > 1e-16
+        ϕ, mismatch, mismatch0 = optimize!(ϕ, identity, ap, mmis, mu_strategy="monotone", mu_init=mu_init)
+        mismatch <= mismatch0 && break
+        mu_init /= 10
+        @show mu_init
+    end
+    ϕ, mismatch
 end
 
 ###
