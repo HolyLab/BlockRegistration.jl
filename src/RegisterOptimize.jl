@@ -142,7 +142,7 @@ function RigidValue{T<:Real}(fixed::AbstractArray, moving::AbstractArray{T}, SD,
     m = copy(moving)
     mnan = isnan(m)
     m[mnan] = 0
-    metp = extrapolate(interpolate!(m, BSpline{Quadratic{InPlace}}, OnCell), NaN)
+    metp = extrapolate(interpolate!(m, BSpline(Quadratic(InPlace())), OnCell()), NaN)
     RigidValue{ndims(f),typeof(f),typeof(metp),typeof(SD)}(f, !fnan, metp, SD, thresh)
 end
 

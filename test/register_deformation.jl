@@ -61,7 +61,7 @@ for knots in ((linspace(1,15,5),),
             end
         end
         u = cat(1, u_is...)
-        ϕ = interpolate!(RegisterDeformation.GridDeformation(copy(u), knots), InPlaceQ)
+        ϕ = interpolate!(RegisterDeformation.GridDeformation(copy(u), knots), InPlaceQ())
         for i = 1:10
             y = Float64[randrange((knot[2]+knot[1])/2, (knot[end]+knot[end-1])/2) for knot in knots]
             dx = Float64[fs[d](y) for d=1:N]
@@ -131,7 +131,7 @@ any(isnan, dest) && warn("Some dest are NaN, not yet sure whether this is a prob
 
 # Stretches
 u = [0.0,5.0,10.0]
-ϕ = interpolate(RegisterDeformation.GridDeformation(u', size(p)), Line)
+ϕ = interpolate(RegisterDeformation.GridDeformation(u', size(p)), Line())
 q = RegisterDeformation.WarpedArray(p, ϕ)
 RegisterDeformation.getindex!(dest, q, 1:10)
 @assert abs(dest[1] - p[1]) < sqrt(eps(1.0f0))

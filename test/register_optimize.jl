@@ -171,7 +171,7 @@ for I in eachindex(nums)
 end
 denom = ones(m, n)
 mms = mismatcharrays(nums, denom)
-mmis = interpolate_mm!(mms; BC=InPlaceQ)
+mmis = interpolate_mm!(mms; BC=InPlaceQ())
 
 u = randn(2, gridsize...)
 ϕ = GridDeformation(u, knots)
