@@ -11,10 +11,10 @@ function run_components(f, A)
     A0, A1, A2 = CUDArt.to_host(G0), CUDArt.to_host(G1), CUDArt.to_host(G2)
 end
 
-img = rand(@compat(map(UInt8,0:255)), 256, 256)
+img = rand(map(UInt8,0:255), 256, 256)
 rng = Any[1:240, 10:250]
-fixed = @compat(map(Float32, img[rng...]))
-moving = @compat(map(Float32, img[rng[1]+13, rng[2]-8]))
+fixed = map(Float32, img[rng...])
+moving = map(Float32, img[rng[1]+13, rng[2]-8])
 
 CUDArt.devices(dev->CUDArt.capability(dev)[1] >= 2, nmax=1) do devlist
 #     CuModule("../register_mismatch_cuda.ptx") do md

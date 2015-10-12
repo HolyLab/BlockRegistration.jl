@@ -186,17 +186,17 @@ end
 # end
 # (but there are several challenges, including the lack of a continuous gradient)
 
-function Interpolations.interpolate{BC}(ϕ::GridDeformation, ::Type{BC})
-    itp = scale(interpolate(ϕ.u, BSpline{Quadratic{BC}}, OnCell), ϕ.knots...)
+function Interpolations.interpolate(ϕ::GridDeformation, BC)
+    itp = scale(interpolate(ϕ.u, BSpline(Quadratic(BC)), OnCell()), ϕ.knots...)
     GridDeformation(itp)
 end
-Interpolations.interpolate(ϕ::GridDeformation) = interpolate(ϕ, Flat)
+Interpolations.interpolate(ϕ::GridDeformation) = interpolate(ϕ, Flat())
 
-function Interpolations.interpolate!{BC}(ϕ::GridDeformation, ::Type{BC})
-    itp = scale(interpolate!(ϕ.u, BSpline{Quadratic{BC}}, OnCell), ϕ.knots...)
+function Interpolations.interpolate!(ϕ::GridDeformation, BC)
+    itp = scale(interpolate!(ϕ.u, BSpline(Quadratic(BC)), OnCell()), ϕ.knots...)
     GridDeformation(itp)
 end
-Interpolations.interpolate!(ϕ::GridDeformation) = interpolate!(ϕ, InPlace)
+Interpolations.interpolate!(ϕ::GridDeformation) = interpolate!(ϕ, InPlace())
 
 Interpolations.interpolate{ T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}) = error("ϕ is already interpolating")
 
@@ -210,7 +210,9 @@ end
     length(xs) == N || throw(DimensionMismatch("$(length(xs)) indexes is not consistent with ϕ dimensionality $N"))
     xindexes = [:(xs[$d]) for d = 1:N]
     ϕxindexes = [:(xs[$d]+ux[$d]) for d = 1:N]
+    meta = Expr(:meta, :inline)
     quote
+        $meta
         ux = ϕ.u[$(xindexes...)]
         Vec($(ϕxindexes...))
     end
@@ -351,7 +353,7 @@ end
 
 # Create an interpolatable ϕ
 function WarpedArray{T,N}(data::Extrapolatable{T,N}, ϕ::GridDeformation)
-    itp = scale(interpolate(ϕ.u, BSpline{Quadratic{Flat}}, OnCell), ϕ.knots...)
+    itp = scale(interpolate(ϕ.u, BSpline(Quadratic(Flat())), OnCell()), ϕ.knots...)
     ϕ′ = GridDeformation(itp, ϕ.knots)
     WarpedArray{T,N,typeof(data),typeof(ϕ′)}(data, ϕ′)
 end
@@ -503,7 +505,7 @@ function warpgrid(ϕ; scale=1, showidentity::Bool=false)
 end
 
 # TODO?: do we need to return real values beyond-the-edge for a SubArray?
-to_etp(img) = extrapolate(interpolate(data(img), BSpline{Linear}, OnGrid), convert(promote_type(eltype(img), Float32), NaN))
+to_etp(img) = extrapolate(interpolate(data(img), BSpline(Linear()), OnGrid()), convert(promote_type(eltype(img), Float32), NaN))
 
 to_etp(itp::AbstractInterpolation) = extrapolate(itp, convert(promote_type(eltype(itp), Float32), NaN))
 

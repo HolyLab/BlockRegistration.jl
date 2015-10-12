@@ -3,12 +3,33 @@ __precompile__()
 module RegisterOptimize
 
 using MathProgBase, Ipopt, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers
-using RegisterCore, RegisterDeformation, RegisterMismatch, RegisterPenalty
+using RegisterCore, RegisterDeformation, RegisterMismatch, RegisterPenalty, RegisterFit
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base.Test
 
 import Base: *
 import MathProgBase: SolverInterface
+
+export
+    auto_λ,
+    fit_sigmoid,
+    initial_deformation,
+    optimize!,
+    optimize_rigid
+
+"""
+This module provides convenience functions for minimizing the mismatch
+between images. It supports both rigid registration and deformable
+registration.
+
+The main functions are:
+
+- `optimize_rigid`: iteratively improve a rigid transformation, given raw images
+- `initial_deformation`: provide an initial guess based on mismatch quadratic fits
+- `optimize!`: iteratively improve a deformation, given mismatch data
+"""
+RegisterOptimize
+
 
 # Some conveniences for MathProgBase
 abstract GradOnly <: SolverInterface.AbstractNLPEvaluator
@@ -30,29 +51,17 @@ SolverInterface.jac_structure(::GradOnlyBoundsOnly) = Int[], Int[]
 SolverInterface.eval_jac_g(::GradOnlyBoundsOnly, J, x) = nothing
 
 
+abstract BoundsOnly <: SolverInterface.AbstractNLPEvaluator
+
+SolverInterface.eval_g(::BoundsOnly, g, x) = nothing
+SolverInterface.jac_structure(::BoundsOnly) = Int[], Int[]
+SolverInterface.eval_jac_g(::BoundsOnly, J, x) = nothing
+
+
 # Some necessary ForwardDiff extensions to make Interpolations work
 Base.real(v::ForwardDiff.GradientNumber) = real(v.value)
 Base.ceil(::Type{Int}, v::ForwardDiff.GradientNumber)  = ceil(Int, v.value)
 Base.floor(::Type{Int}, v::ForwardDiff.GradientNumber) = floor(Int, v.value)
-
-export
-    initial_deformation,
-    optimize!,
-    optimize_rigid
-
-"""
-This module provides convenience functions for minimizing the mismatch
-between images. It supports both rigid registration and deformable
-registration.
-
-The main functions are:
-
-- `optimize_rigid`: iteratively improve a rigid transformation, given raw images
-- `initial_deformation`: provide an initial guess based on mismatch quadratic fits
-- `optimize!`: iteratively improve a deformation, given mismatch data
-"""
-RegisterOptimize
-
 
 ###
 ### Rigid registration from raw images
@@ -133,7 +142,7 @@ function RigidValue{T<:Real}(fixed::AbstractArray, moving::AbstractArray{T}, SD,
     m = copy(moving)
     mnan = isnan(m)
     m[mnan] = 0
-    metp = extrapolate(interpolate!(m, BSpline{Quadratic{InPlace}}, OnCell), NaN)
+    metp = extrapolate(interpolate!(m, BSpline(Quadratic(InPlace())), OnCell()), NaN)
     RigidValue{ndims(f),typeof(f),typeof(metp),typeof(SD)}(f, !fnan, metp, SD, thresh)
 end
 
@@ -185,12 +194,37 @@ If `ϕ_old` is not the identity, it must be interpolating.
 """
 function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
     b = prep_b(T, cs, Qs)
+    # A = to_full(ap, Qs)
+    # F = svdfact(A)
+    # S = F[:S]
+    # smax = maximum(S)
+    # fac = sqrt(eps(typeof(smax)))
+    # for i = 1:length(S)
+    #     if S[i] < fac*smax
+    #         S[i] = Inf
+    #     end
+    # end
+    # x, isconverged = F\b, true
     # In case the grid is really big, solve iteratively
     # (The matrix is not sparse, but matrix-vector products can be
     # computed efficiently.)
     P = AffineQHessian(ap, Qs, identity)
-    x = find_opt(P, b)
-    u0 = convert_to_fixed(x, (N,size(cs)...)) #reinterpret(Vec{N,eltype(x)}, x, size(cs))
+    x, isconverged = find_opt(P, b)
+    convert_to_fixed(x, (N,size(cs)...))::Array{Vec{N,T},N}, isconverged
+end
+
+function to_full{T,N}(ap::AffinePenalty{T,N}, Qs)
+    FF = ap.F*ap.F'
+    nA = N*size(FF,1)
+    FFN = zeros(nA,nA)
+    for o = 1:N
+        FFN[o:N:end,o:N:end] = FF
+    end
+    A = ap.λ*(I - FFN)
+    for i = 1:length(Qs)
+        A[N*(i-1)+1:N*i, N*(i-1)+1:N*i] += Qs[i]
+    end
+    A
 end
 
 function prep_b{T}(::Type{T}, cs, Qs)
@@ -205,8 +239,7 @@ end
 
 function find_opt(P, b)
     x, result = cg(P, b)
-    @assert result.isconverged
-    x
+    x, result.isconverged
 end
 
 # A type for computing multiplication by the linear operator
@@ -216,8 +249,7 @@ type AffineQHessian{AP<:AffinePenalty,M<:Mat,N,Φ}
     ϕ_old::Φ
 end
 
-function AffineQHessian(ap::AffinePenalty, Qs::AbstractArray, ϕ_old)
-    T = eltype(first(Qs))
+function AffineQHessian{T}(ap::AffinePenalty{T}, Qs::AbstractArray, ϕ_old)
     N = ndims(Qs)
     AffineQHessian{typeof(ap),Mat{N,N,T},N,typeof(ϕ_old)}(ap, Qs, ϕ_old)
 end
@@ -237,8 +269,18 @@ function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     P.ap.λ = λ*n/2
     affine_part!(g, P, u)
     P.ap.λ = λ
+    sumQ = zero(T)
     for i = 1:n
         g[i] += P.Qs[i] * u[i]
+        sumQ += trace(P.Qs[i])
+    end
+    # Add a stabilizing diagonal, for cases where λ is very small
+    if sumQ == 0
+        sumQ = one(T)
+    end
+    fac = cbrt(eps(T))*sumQ/n
+    for i = 1:n
+        g[i] += fac*u[i]
     end
     reinterpret(T, g, size(x))
 end
@@ -326,28 +368,34 @@ end
 ### Optimize (via descent) a deformation to mismatch data
 ###
 """
-`ϕ, fval = optimize!(ϕ, ϕ_old, dp, mmis; [tol=1e-4, print_level=0])`
+`ϕ, fval, fval0 = optimize!(ϕ, ϕ_old, dp, mmis; [tol=1e-6, print_level=0])`
 improves an initial deformation `ϕ` to reduce the mismatch.  The
 arguments are as described for `penalty!` in RegisterPenalty.  On
-output, `ϕ` is set in-place to the new optimized deformation, and
-`fval` is the value of the penalty.
+output, `ϕ` is set in-place to the new optimized deformation,
+`fval` is the value of the penalty, and `fval0` was the starting value.
+
+It's recommended that you verify that `fval < fval0`; if it's not
+true, consider adding `mu_strategy="monotone", mu_init=??` to the
+options (where the value of ?? might require some experimentation; a
+starting point might be 1e-4).
+
 """
-function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_level=0)
+function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-6, print_level=0, kwargs...)
     objective = DeformOpt(ϕ, ϕ_old, dp, mmis)
     uvec = u_as_vec(ϕ)
     T = eltype(uvec)
     mxs = maxshift(first(mmis))
 
-    solver = IpoptSolver(hessian_approximation="limited-memory",
+    solver = IpoptSolver(;hessian_approximation="limited-memory",
                          print_level=print_level,
-                         tol=tol)
+                         tol=tol, kwargs...)
     m = SolverInterface.model(solver)
     ub1 = T[mxs...] - T(0.5001)
     ub = repeat(ub1, outer=[length(ϕ.u)])
     SolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
     SolverInterface.setwarmstart!(m, uvec)
-    val0 = SolverInterface.eval_f(objective, uvec)
-    isfinite(val0) || error("Initial value must be finite")
+    fval0 = SolverInterface.eval_f(objective, uvec)
+    isfinite(fval0) || error("Initial value must be finite")
     SolverInterface.optimize!(m)
 
     stat = SolverInterface.status(m)
@@ -355,7 +403,7 @@ function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-4, print_lev
     uopt = SolverInterface.getsolution(m)
     fval = SolverInterface.getobjval(m)
     copy!(uvec, uopt)
-    ϕ, fval
+    ϕ, fval, fval0
 end
 
 function u_as_vec(ϕ)
@@ -385,6 +433,103 @@ function SolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(vec_as_u(grad_f, d.ϕ), d.ϕ, d.ϕ_old, d.dp, d.mmis)
+end
+
+function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis)
+    maxshift = map(x->(x-1)>>1, size(first(mmis)))
+    u0, isconverged = initial_deformation(ap, cs, Qs)
+    if !isconverged
+        Base.warn_once("initial_deformation failed to converge with λ = ", ap.λ)
+    end
+    uclamp!(u0, maxshift)
+    ϕ = GridDeformation(u0, knots)
+    mu_init = 0.1
+    local mismatch
+    while mu_init > 1e-16
+        ϕ, mismatch, mismatch0 = optimize!(ϕ, identity, ap, mmis, mu_strategy="monotone", mu_init=mu_init)
+        mismatch <= mismatch0 && break
+        mu_init /= 10
+        @show mu_init
+    end
+    ϕ, mismatch
+end
+
+###
+### Set λ automatically
+###
+function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λmin, λmax)
+    gridsize = map(length, knots)
+    uc = zeros(T, N, gridsize...)
+    for i = 1:length(cs)
+        uc[:,i] = cs[i]
+    end
+    function optimizer!(x, mu_init)
+        local pnew
+        while mu_init > 1e-16
+            x, pnew, p0 = optimize!(x, identity, ap, mmis, mu_strategy="monotone", mu_init=mu_init)
+            pnew <= p0 && break
+            mu_init /= 10
+            @show mu_init
+        end
+        x, pnew
+    end
+    ap.λ = λ = λmin
+    maxshift = map(x->(x-1)>>1, size(first(mmis)))
+    uclamp!(uc, maxshift)
+    ϕprev = GridDeformation(uc, knots)
+    mu_init = 0.1
+    ϕprev, mismatchprev = optimizer!(ϕprev, mu_init)
+    u0, isconverged = initial_deformation(ap, cs, Qs)
+    if !isconverged
+        Base.warn_once("initial_deformation failed to converge with λ = ", λ)
+    end
+    uclamp!(u0, maxshift)
+    ϕap = GridDeformation(u0, knots)
+    ϕap, mismatchap = optimizer!(ϕap, mu_init)
+    mm_all = typeof(mismatchprev)[]
+    datapenalty_all = similar(mm_all)
+    ϕ_all = Any[]
+    # Keep the lower penalty, but for the purpose of the sigmoidal fit
+    # evaluate just the data penalty
+    if mismatchprev < mismatchap
+        push!(mm_all, mismatchprev)
+        push!(datapenalty_all, penalty!(nothing, ϕprev, mmis))
+        push!(ϕ_all, ϕprev)
+    else
+        push!(mm_all, mismatchap)
+        push!(datapenalty_all, penalty!(nothing, ϕap, mmis))
+        push!(ϕ_all, ϕap)
+    end
+    λ_all = [λ]
+    λ *= 2
+    while λ < λmax
+        @show λ
+        ap.λ = λ
+        ϕprev = GridDeformation(copy(ϕ_all[end].u), knots)
+        ϕprev, mismatchprev = optimizer!(ϕprev, mu_init)
+        u0, isconverged = initial_deformation(ap, cs, Qs)
+        if !isconverged
+            Base.warn_once("initial_deformation failed to converge with λ = ", λ)
+        end
+        uclamp!(u0, maxshift)
+        ϕap = GridDeformation(u0, knots)
+        ϕap, mismatchap = optimizer!(ϕap, mu_init)
+        if mismatchprev < mismatchap
+            push!(mm_all, mismatchprev)
+            push!(datapenalty_all, penalty!(nothing, ϕprev, mmis))
+            push!(ϕ_all, ϕprev)
+        else
+            push!(mm_all, mismatchap)
+            push!(datapenalty_all, penalty!(nothing, ϕap, mmis))
+            push!(ϕ_all, ϕap)
+        end
+        push!(λ_all, λ)
+        λ *= 2
+    end
+    bottom, top, center, width, val = fit_sigmoid(datapenalty_all)
+    idx = max(1, round(Int, center-width))
+    quality = val/(top-bottom)^2/length(datapenalty_all)
+    ϕ_all[idx], mm_all[idx], λ_all[idx], datapenalty_all, quality
 end
 
 ###
@@ -476,5 +621,89 @@ function _calculate_u{N}(At, Xt, gridsize::NTuple{N})
     reinterpret(Vec{N, eltype(u)}, u, gridsize) # put u in the shape of the grid
 end
 
+###
+### Fitting to a sigmoid
+###
+# Used in automatically setting λ
+
+"""
+`fit_sigmoid(data, [bottom, top, center, width])` fits the y-values in `data` to a logistic function
+```
+   y = bottom + (top-bottom)./(1 + exp(-(data-center)/width))
+```
+This is "non-extrapolating": the parameter values are constrained to
+be within the range of the supplied data (i.e., `bottom` and `top`
+between the min and max values of `data`, `center` within `[1,
+length(data)]`, and `0.1 <= width <= length(data)`.)
+"""
+function fit_sigmoid(data, bottom, top, center, width)
+    length(data) >= 4 || error("Too few data points for sigmoidal fit")
+    objective = SigmoidOpt(data)
+    solver = IpoptSolver(print_level=0)
+    m = SolverInterface.model(solver)
+    x0 = Float64[bottom, top, center, width]
+    mn, mx = extrema(data)
+    ub = [mx, mx, length(data), length(data)]
+    lb = [mn, mn, 1, 0.1]
+    SolverInterface.loadnonlinearproblem!(m, 4, 0, lb, ub, Float64[], Float64[], :Min, objective)
+    SolverInterface.setwarmstart!(m, x0)
+    SolverInterface.optimize!(m)
+
+    stat = SolverInterface.status(m)
+    stat == :Optimal || warn("Solution was not optimal")
+    x = SolverInterface.getsolution(m)
+
+    x[1], x[2], x[3], x[4], SolverInterface.getobjval(m)
+end
+
+function fit_sigmoid(data)
+    length(data) >= 4 || error("Too few data points for sigmoidal fit")
+    sdata = sort(data)
+    mid = length(data)>>1
+    bottom = mean(sdata[1:mid])
+    top = mean(sdata[mid+1:end])
+    fit_sigmoid(data, bottom, top, mid, mid)
+end
+
+
+type SigmoidOpt{G,H} <: BoundsOnly
+    data::Vector{Float64}
+    g::G
+    h::H
+end
+
+SigmoidOpt(data::Vector{Float64}) = SigmoidOpt(data, ForwardDiff.gradient(x->sigpenalty(x, data)), ForwardDiff.hessian(x->sigpenalty(x, data)))
+
+function SolverInterface.initialize(d::SigmoidOpt, requested_features::Vector{Symbol})
+    for feat in requested_features
+        if !(feat in [:Grad, :Jac, :Hess])
+            error("Unsupported feature $feat")
+        end
+    end
+end
+SolverInterface.features_available(d::SigmoidOpt) = [:Grad, :Jac, :Hess]
+
+SolverInterface.eval_f(d::SigmoidOpt, x) = sigpenalty(x, d.data)
+
+SolverInterface.eval_grad_f(d::SigmoidOpt, grad_f, x) =
+    copy!(grad_f, d.g(x))
+
+function SolverInterface.hesslag_structure(d::SigmoidOpt)
+    I, J = Int[], Int[]
+    for i in CartesianRange((4,4))
+        push!(I, i[1])
+        push!(J, i[2])
+    end
+    (I, J)
+end
+
+function SolverInterface.eval_hesslag(d::SigmoidOpt, H, x, σ, μ)
+    copy!(H, σ * d.h(x))
+end
+
+function sigpenalty(x, data)
+    bottom, top, center, width = x[1], x[2], x[3], x[4]
+    sumabs2((data-bottom)/(top-bottom) - 1./(1+exp(-((1:length(data))-center)/width)))
+end
 
 end # module

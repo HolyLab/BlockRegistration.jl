@@ -312,13 +312,13 @@ quadratic interpolation coefficients.
 `mmis = interpolate_mm!(mms)` prepares the array-of-MismatchArrays
 `mms` for interpolation.
 """
-function interpolate_mm!{T<:MismatchArray}(mms::AbstractArray{T}; BC=InPlace)
-    f = x->CenterIndexedArray(interpolate!(x.data, BSpline{Quadratic{BC}}, OnCell))
+function interpolate_mm!{T<:MismatchArray}(mms::AbstractArray{T}; BC=InPlace())
+    f = x->CenterIndexedArray(interpolate!(x.data, BSpline(Quadratic(BC)), OnCell()))
     map(f, mms)
 end
 
-function interpolate_mm!(mm::MismatchArray; BC=InPlace)
-    CenterIndexedArray(interpolate!(mm.data, BSpline{Quadratic{BC}}, OnCell))
+function interpolate_mm!(mm::MismatchArray; BC=InPlace())
+    CenterIndexedArray(interpolate!(mm.data, BSpline(Quadratic(BC)), OnCell()))
 end
 
 @generated function Interpolations.gradient!{T,N}(g::AbstractVector, A::CenterIndexedArray{T,N}, i::Number...)

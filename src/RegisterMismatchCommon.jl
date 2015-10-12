@@ -2,7 +2,7 @@
 
 using RegisterCore, CenterIndexedArrays
 
-export correctbias!, nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_size, highpass, truncatenoise!
+export correctbias!, nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_width, highpass, truncatenoise!
 
 typealias DimsLike Union{AbstractVector{Int}, Dims}
 typealias WidthLike Union{AbstractVector,Tuple}
@@ -21,14 +21,15 @@ function mismatch_apertures{T}(::Type{T}, fixed::AbstractArray, moving::Abstract
 end
 
 """
-`mmc = correctbias!(mm::MismatchArray)` replaces "suspect" mismatch
+`correctbias!(mm::MismatchArray)` replaces "suspect" mismatch
 data with imputed data.  If each pixel in your camera has a different
 bias, then matching that bias becomes an incentive to avoid
 shifts.  Likewise, CMOS cameras tend to have correlated row/column
 noise. These two factors combine to imply that `mm[i,j]` is unreliable
 whenever `i` or `j` is zero.
 
-Data are imputed by averaging the adjacent non-suspect values.
+Data are imputed by averaging the adjacent non-suspect values.  This
+function works in-place, overwriting the original `mm`.
 """
 function correctbias!{ND,N}(mm::MismatchArray{ND,N})
     T = eltype(ND)
@@ -62,6 +63,7 @@ function correctbias!{ND,N}(mm::MismatchArray{ND,N})
     mm
 end
 
+"`correctbias!(mms)` runs `correctbias!` on each element of an array-of-MismatchArrays."
 function correctbias!{M<:MismatchArray}(mms::AbstractArray{M})
     for mm in mms
         correctbias!(mm)
@@ -153,16 +155,20 @@ function aperture_grid(ssize, gridsize)
 end
 
 """
-`mms = allocate_mmarrays(T, aperture_centers, maxshift)` allocates
-storage for aperture-wise mismatch computation. `mms` will be an
+`mms = allocate_mmarrays(T, gridsize, maxshift)` allocates storage for
+aperture-wise mismatch computation. `mms` will be an
 Array-of-MismatchArrays with element type `NumDenom{T}` and half-size
-`maxshift`, with the outer array having the same "grid" shape as
-`aperture_centers`.  The centers can in general be provided as an
-vector-of-tuples, vector-of-vectors, or a matrix with each point in a
-column.  If your centers are arranged in a rectangular grid, you can
-use an `N`-dimensional array-of-tuples (or array-of-vectors) or an
-`N+1`-dimensional array with the center positions specified along the
-first dimension.
+`maxshift`. `mms` will be an array of size `gridsize`. This syntax is
+recommended when your apertures are centered at points of a grid.
+
+`mms = allocate_mmarrays(T, aperture_centers, maxshift)` returns `mms`
+with a shape that matches that of `aperture_centers`. The centers can
+in general be provided as an vector-of-tuples, vector-of-vectors, or a
+matrix with each point in a column.  If your centers are arranged in a
+rectangular grid, you can use an `N`-dimensional array-of-tuples (or
+array-of-vectors) or an `N+1`-dimensional array with the center
+positions specified along the first dimension.  (But you may find the
+`gridsize` syntax to be simpler.)
 """
 function allocate_mmarrays{T,C<:Union{AbstractVector,Tuple}}(::Type{T}, aperture_centers::AbstractArray{C}, maxshift)
     isempty(aperture_centers) && error("aperture_centers is empty")
@@ -178,6 +184,15 @@ end
 function allocate_mmarrays{T,R<:Real}(::Type{T}, aperture_centers::AbstractArray{R}, maxshift)
     N = ndims(aperture_centers)-1
     mms = Array(MismatchArray{T,N}, size(aperture_centers)[2:end])
+    sz = map(x->2*x+1, maxshift)
+    for i in eachindex(mms)
+        mms[i] = MismatchArray(T, sz...)
+    end
+    mms
+end
+
+function allocate_mmarrays{T<:Real,N}(::Type{T}, gridsize::NTuple{N,Int}, maxshift)
+    mms = Array(MismatchArray{NumDenom{T},N}, gridsize)
     sz = map(x->2*x+1, maxshift)
     for i in eachindex(mms)
         mms[i] = MismatchArray(T, sz...)
