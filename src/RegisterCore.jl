@@ -17,17 +17,18 @@ export
     MismatchArray,
     NumDenom,
     # functions
-    maxshift,
+    highpass,
     indmin_mismatch,
-    separate,
+    maxshift,
     mismatcharrays,
-    ratio
+    ratio,
+    separate
 
 """
 # RegisterCore
 
 `RegisterCore` contains low-level utilities for working with "mismatch
-data."
+data," as well as a few miscellaneous utilities.
 
 ## Mismatch
 
@@ -171,6 +172,7 @@ The major functions/types exported by this module are:
   `(num,denom)` mismatch data
 - `separate`: splits a `NumDenom` array into its component `num,denom` arrays
 - `indmin_mismatch`: find the location of the minimum mismatch
+- `highpass`: highpass filter an image before performing registration
 
 """
 RegisterCore
@@ -390,5 +392,33 @@ function indmin_mismatch{T<:Number}(r::CenterIndexedArray{T})
     indctr = map(d->ind[d]-(size(r,d)+1)>>1, (1:ndims(r)...))
     CartesianIndex(indctr)
 end
+
+### Miscellaneous
+
+"""
+`datahp = highpass([T], data, sigma)` returns a highpass-filtered
+version of `data`, with all negative values truncated at 0.  The
+highpass is computed by subtracting a lowpass-filtered version of
+data, using Gaussian filtering of width `sigma`.  As it is based on
+`Image.jl`'s Gaussian filter, it gracefully handles `NaN` values.
+
+If you do not wish to highpass-filter along a particular axis, put
+`Inf` into the corresponding slot in `sigma`.
+
+You may optionally specify the element type of the result, which for
+`Integer` or `FixedPoint` inputs defaults to `Float32`.
+"""
+function highpass{T}(::Type{T}, data::AbstractArray, sigma)
+    sigmav = [sigma...]
+    if any(isinf(sigmav))
+        datahp = convert(Array{T,ndims(data)}, data)
+    else
+        datahp = data - imfilter_gaussian(data, sigmav, astype=T)
+    end
+    datahp[datahp .< 0] = 0  # truncate anything below 0
+    datahp
+end
+highpass{T<:AbstractFloat}(data::AbstractArray{T}, sigma) = highpass(T, data, sigma)
+highpass(data::AbstractArray, sigma) = highpass(Float32, data, sigma)
 
 end
