@@ -447,13 +447,21 @@ warp_type{C<:Colorant, T<:AbstractFloat}(img::AbstractArray{C}, ::Type{T}) = C
 warp_type{C<:Colorant, T}(img::AbstractArray{C}, ::Type{T}) = base_colorant_type(C){Float32}
 
 """
-`warp!(dest, w::WarpedArray)` instantiates a `WarpedArray` in the output `dest`.
+`warp!(dest, src::WarpedArray)` instantiates a `WarpedArray` in the output `dest`.
 """
-function warp!(dest::AbstractArray, wimg::WarpedArray)
-    for I in CartesianRange(size(wimg))
-        dest[I] = wimg[I]
+@generated function warp!{_,N}(dest::AbstractArray{_,N}, src::WarpedArray)
+    ϕxindexes = [:(I[$d]+ux[$d]) for d = 1:N]
+    quote
+        size(dest) == size(src) || error("dest must have the same size as src")
+        # Can use zip once MAX_TYPE_DEPTH gets bumped, see julia #13561
+        destiter = CartesianRange(size(dest))
+        deststate = start(destiter)
+        for ux in eachvalue(src.ϕ.u)
+            I, deststate = next(destiter, deststate)
+            dest[I] = src.data[$(ϕxindexes...)]
+        end
+        dest
     end
-    dest
 end
 
 
