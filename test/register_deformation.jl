@@ -1,5 +1,5 @@
 import RegisterDeformation
-using AffineTransforms, Interpolations, ColorTypes, ForwardDiff
+using AffineTransforms, Interpolations, ColorTypes, ForwardDiff, FixedSizeArrays, Images
 using Base.Test
 
 knots = (linspace(1,15,5), linspace(1,11,3))
@@ -228,3 +228,25 @@ B = RegisterDeformation.warpgrid(ϕ, scale=1.5)
 @test isa(A, Matrix{Float32})
 C = RegisterDeformation.warpgrid(ϕ, showidentity=true)
 @test eltype(C) == RGB{Float32}
+
+# Writing warped data to disk
+o = ones(Float32, 5, 5)
+A = o .* reshape(1:7, (1,1,7))
+img = Image(A, timedim=3)
+uarray = reinterpret(Vec{2,Float64}, zeros(2,3,3,7), (3,3,7))
+fn = tempname()
+open(fn, "w") do io
+    RegisterDeformation.warp!(Float32, io, img, uarray)
+end
+warped = open(fn, "r") do io
+    read(io, Float32, size(img))
+end
+@test warped == img
+# Multi-process
+open(fn, "w") do io
+    RegisterDeformation.warp!(Float32, io, img, uarray; nworkers=3)
+end
+warped = open(fn, "r") do io
+    read(io, Float32, size(img))
+end
+@test warped == img

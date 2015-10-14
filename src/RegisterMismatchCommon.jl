@@ -2,7 +2,7 @@
 
 using RegisterCore, CenterIndexedArrays
 
-export correctbias!, nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_width, highpass, truncatenoise!
+export correctbias!, nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_width, truncatenoise!
 
 typealias DimsLike Union{AbstractVector{Int}, Dims}
 typealias WidthLike Union{AbstractVector,Tuple}
@@ -264,32 +264,6 @@ function default_aperture_width(img, gridsize::DimsLike, overlap::DimsLike = zer
     gflag = [gridsize...].>1
     tuple((([size(img)[sc]...]-gflag)./gsz1+2*[overlap...].*gflag)...)
 end
-
-"""
-`datahp = highpass([T], data, sigma)` returns a highpass-filtered
-version of `data`, with all negative values truncated at 0.  The
-highpass is computed by subtracting a lowpass-filtered version of
-data, using Gaussian filtering of width `sigma`.  As it is based on
-`Image.jl`'s Gaussian filter, it gracefully handles `NaN` values.
-
-If you do not wish to highpass-filter along a particular axis, put
-`Inf` into the corresponding slot in `sigma`.
-
-You may optionally specify the element type of the result, which for
-`Integer` or `FixedPoint` inputs defaults to `Float32`.
-"""
-function highpass{T}(::Type{T}, data::AbstractArray, sigma)
-    sigmav = [sigma...]
-    if any(isinf(sigmav))
-        datahp = convert(Array{T,ndims(data)}, data)
-    else
-        datahp = data - imfilter_gaussian(data, sigmav, astype=T)
-    end
-    datahp[datahp .< 0] = 0  # truncate anything below 0
-    datahp
-end
-highpass{T<:AbstractFloat}(data::AbstractArray{T}, sigma) = highpass(T, data, sigma)
-highpass(data::AbstractArray, sigma) = highpass(Float32, data, sigma)
 
 """
 `truncatenoise!(mm, thresh)` zeros out any entries of the

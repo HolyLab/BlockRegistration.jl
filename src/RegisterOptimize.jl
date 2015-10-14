@@ -13,6 +13,7 @@ import MathProgBase: SolverInterface
 export
     auto_λ,
     fit_sigmoid,
+    fixed_λ,
     initial_deformation,
     optimize!,
     optimize_rigid
@@ -435,6 +436,16 @@ function SolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
     penalty!(vec_as_u(grad_f, d.ϕ), d.ϕ, d.ϕ_old, d.dp, d.mmis)
 end
 
+"""
+`ϕ, penalty = fixed_λ(cs, Qs, knots, affinepenalty, mmis)` computes an
+optimal deformation `ϕ` and its total `penalty` (data penalty +
+regularization penalty).  `cs` and `Qs` come from `qfit`, `knots`
+specifies the deformation grid, `affinepenalty` the `AffinePenalty`
+object for that grid, and `mmis` is the array-of-mismatch arrays
+(already interpolating, see `interpolate_mm!`).
+
+See also: `auto_λ`.
+"""
 function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis)
     maxshift = map(x->(x-1)>>1, size(first(mmis)))
     u0, isconverged = initial_deformation(ap, cs, Qs)
@@ -457,6 +468,39 @@ end
 ###
 ### Set λ automatically
 ###
+"""
+`ϕ, penalty, λ, datapenalty, quality = auto_λ(cs, Qs, knots,
+affinepenalty, mmis, λmin, λmax)` automatically chooses "the best"
+value of `λ` to serve in the regularization penalty. It tests a
+sequence of `λ` values, starting with `λmin` and each successive value
+two-fold larger than the previous; for each such `λ`, it optimizes the
+registration and then evaluates just the "data" portion of the
+penalty.  The "best" value is selected by a sigmoidal fit of the
+impact of `λ` on the data penalty, choosing a value that lies at the
+initial upslope of the sigmoid (indicating that the penalty is large
+enough to begin limiting the form of the deformation, but not yet to
+substantially decrease the quality of the registration).
+
+`cs` and `Qs` come from `qfit`, `knots` specifies the deformation
+grid, `affinepenalty` the `AffinePenalty` object for that grid (the
+value of `lambda` that you used to create the object is unimportant,
+it will be replaced with the sequence described above), and `mmis` is
+the array-of-mismatch arrays (already interpolating, see
+`interpolate_mm!`).
+
+As a first pass, try setting `λmin=1e-6` and `λmax=100`. You can plot
+the returned `datapenalty` and check that it is approximately
+sigmoidal; if not, you will need to alter the range you supply.
+
+Upon return, `ϕ` is the chosen deformation, `penalty` its total
+penalty (data penalty+regularization penalty), `λ` is the chosen value
+of `λ`, `datapenalty` is a vector containing the data penalty for each
+tested `λ` value, and `quality` an estimate (possibly broken) of the
+fidelity of the sigmoidal fit.
+
+See also: `fixed_λ`. Because `auto_λ` performs the optimization
+repeatedly for many different `λ`s, it is slower than `fixed_λ`.
+"""
 function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λmin, λmax)
     gridsize = map(length, knots)
     uc = zeros(T, N, gridsize...)
@@ -469,7 +513,6 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
             x, pnew, p0 = optimize!(x, identity, ap, mmis, mu_strategy="monotone", mu_init=mu_init)
             pnew <= p0 && break
             mu_init /= 10
-            @show mu_init
         end
         x, pnew
     end
@@ -478,48 +521,47 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     uclamp!(uc, maxshift)
     ϕprev = GridDeformation(uc, knots)
     mu_init = 0.1
-    ϕprev, mismatchprev = optimizer!(ϕprev, mu_init)
+    ϕprev, penaltyprev = optimizer!(ϕprev, mu_init)
     u0, isconverged = initial_deformation(ap, cs, Qs)
     if !isconverged
         Base.warn_once("initial_deformation failed to converge with λ = ", λ)
     end
     uclamp!(u0, maxshift)
     ϕap = GridDeformation(u0, knots)
-    ϕap, mismatchap = optimizer!(ϕap, mu_init)
-    mm_all = typeof(mismatchprev)[]
-    datapenalty_all = similar(mm_all)
+    ϕap, penaltyap = optimizer!(ϕap, mu_init)
+    penalty_all = typeof(penaltyprev)[]
+    datapenalty_all = similar(penalty_all)
     ϕ_all = Any[]
     # Keep the lower penalty, but for the purpose of the sigmoidal fit
     # evaluate just the data penalty
-    if mismatchprev < mismatchap
-        push!(mm_all, mismatchprev)
+    if penaltyprev < penaltyap
+        push!(penalty_all, penaltyprev)
         push!(datapenalty_all, penalty!(nothing, ϕprev, mmis))
         push!(ϕ_all, ϕprev)
     else
-        push!(mm_all, mismatchap)
+        push!(penalty_all, penaltyap)
         push!(datapenalty_all, penalty!(nothing, ϕap, mmis))
         push!(ϕ_all, ϕap)
     end
     λ_all = [λ]
     λ *= 2
     while λ < λmax
-        @show λ
         ap.λ = λ
         ϕprev = GridDeformation(copy(ϕ_all[end].u), knots)
-        ϕprev, mismatchprev = optimizer!(ϕprev, mu_init)
+        ϕprev, penaltyprev = optimizer!(ϕprev, mu_init)
         u0, isconverged = initial_deformation(ap, cs, Qs)
         if !isconverged
             Base.warn_once("initial_deformation failed to converge with λ = ", λ)
         end
         uclamp!(u0, maxshift)
         ϕap = GridDeformation(u0, knots)
-        ϕap, mismatchap = optimizer!(ϕap, mu_init)
-        if mismatchprev < mismatchap
-            push!(mm_all, mismatchprev)
+        ϕap, penaltyap = optimizer!(ϕap, mu_init)
+        if penaltyprev < penaltyap
+            push!(penalty_all, penaltyprev)
             push!(datapenalty_all, penalty!(nothing, ϕprev, mmis))
             push!(ϕ_all, ϕprev)
         else
-            push!(mm_all, mismatchap)
+            push!(penalty_all, penaltyap)
             push!(datapenalty_all, penalty!(nothing, ϕap, mmis))
             push!(ϕ_all, ϕap)
         end
@@ -529,7 +571,7 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     bottom, top, center, width, val = fit_sigmoid(datapenalty_all)
     idx = max(1, round(Int, center-width))
     quality = val/(top-bottom)^2/length(datapenalty_all)
-    ϕ_all[idx], mm_all[idx], λ_all[idx], datapenalty_all, quality
+    ϕ_all[idx], penalty_all[idx], λ_all[idx], datapenalty_all, quality
 end
 
 ###

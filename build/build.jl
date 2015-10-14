@@ -3,4 +3,3 @@ if Base.find_in_path("RFFT") == nothing
 end
 Pkg.checkout("FixedSizeArrays")
 Pkg.checkout("AffineTransforms")
-Pkg.checkout("Interpolations")
