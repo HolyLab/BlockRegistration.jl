@@ -8,3 +8,5 @@ Ipopt
 IterativeSolvers
 CUDArt
 CUFFT
+HDF5
+JLD
