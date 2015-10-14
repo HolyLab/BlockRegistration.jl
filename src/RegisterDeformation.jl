@@ -2,7 +2,8 @@ __precompile__()
 
 module RegisterDeformation
 
-using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, RegisterUtilities
+using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, HDF5, JLD
+using RegisterUtilities
 using Base.Cartesian
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
 
@@ -470,7 +471,8 @@ end
 
 
 """
-`warp!(dest, img, ϕ)` warps `img` using the deformation `ϕ`.  The result is stored in `dest`.
+`warp!(dest, img, ϕ)` warps `img` using the deformation `ϕ`.  The
+result is stored in `dest`.
 """
 function warp!(dest::AbstractArray, img::AbstractArray, ϕ)
     wimg = WarpedArray(to_etp(img), ϕ)
@@ -486,7 +488,98 @@ function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ϕ)
 end
 
 """
+`warp!(T, io, img, uarray; [nworkers=1])` writes warped images to
+disk. `io` is an `IO` object or HDF5/JLD dataset (the latter must be
+pre-allocated using `d_create` to be of the proper size). `img` is an
+image sequence, and `uarray` is an array of `u` values, one per image
+in `img` (where `size(uarray)[end] == nimages(img)`).  If `nworkers`
+is greater than one, it will spawn additional processes to perform the
+deformation.
+"""
+function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, u; nworkers=1)
+    n = nimages(img)
+    ssz = size(img)[coords_spatial(img)]
+    if n == 1
+        if ndims(u) == sdims(img)+1
+            ϕ = GridDeformation(reshape(u, size(u)[1:end-1]), ssz)
+        else
+            ϕ = GridDeformation(u, ssz)
+        end
+        destarray = Array(T, ssz)
+        warp!(destarray, img, ϕ)
+        warp_write(dest, destarray)
+        return nothing
+    end
+    ndims(u) == sdims(img)+1 || error("u's dimensionality $(ndims(u)) is inconsistent with the number of spatial dimensions $(sdims(img)) of the image")
+    if size(u)[end] != n
+        error("Must have one `u` slice per image")
+    end
+    if nworkers > 1
+        return _warp!(T, dest, img, u, nworkers)
+    end
+    destarray = Array(T, ssz)
+    colons = [Colon() for d = 1:ndims(u)-1]
+    for i = 1:n
+        ϕ = GridDeformation(u[colons..., i], ssz)
+        warp!(destarray, slice(img, "t", i), ϕ)
+        warp_write(dest, destarray, i)
+    end
+    nothing
+end
 
+warp!(dest::Union{HDF5Dataset,JLD.JldDataset}, img, u; nworkers=1) =
+    warp(eltype(dest), dest, img, u; nworkers=nworkers)
+
+function _warp!{T}(::Type{T}, dest, img, u, nworkers)
+    n = nimages(img)
+    colons = [Colon() for d = 1:ndims(u)-1]
+    ssz = size(img)[coords_spatial(img)]
+    wpids = addprocs(nworkers)
+    simg = Array(Any, 0)
+    swarped = Array(Any, 0)
+    rrs = Array(RemoteRef, 0)
+    mydir = splitdir(@__FILE__)[1]
+    for p in wpids
+        remotecall_fetch(p, Main.eval, :(push!(LOAD_PATH, $mydir)))
+        remotecall_fetch(p, Main.eval, :(using RegisterDeformation))
+        push!(simg, SharedArray(eltype(img), ssz, pids=[myid(),p]))
+        push!(swarped, SharedArray(T, ssz, pids=[myid(),p]))
+    end
+    nextidx = 0
+    getnextidx() = nextidx += 1
+    writing_mutex = RemoteRef()
+    @sync begin
+        for i = 1:nworkers
+            p = wpids[i]
+            src = simg[i]
+            warped = swarped[i]
+            @async begin
+                while (idx = getnextidx()) <= n
+                    ϕ = GridDeformation(u[colons..., idx], ssz)
+                    copy!(src, slice(img, "t", idx))
+                    remotecall_fetch(p, warp!, warped, src, ϕ)
+                    put!(writing_mutex, true)
+                    warp_write(dest, warped, idx)
+                    take!(writing_mutex)
+                end
+            end
+        end
+    end
+    nothing
+end
+
+warp_write(io::IO, destarray) = write(io, destarray)
+function warp_write(io::IO, destarray, i)
+    offset = (i-1)*length(destarray)*sizeof(eltype(destarray))
+    seek(io, offset)
+    write(io, destarray)
+end
+function warp_write(dest, destarray, i)
+    colons = [Colon() for d = 1:ndims(destarray)]
+    dest[colons..., i] = destarray
+end
+
+"""
 `img = warpgrid(ϕ; [scale=1, showidentity=false])` returns an image
 `img` that permits visualization of the deformation `ϕ`.  The output
 is a warped rectangular grid with nodes centered on the control points
