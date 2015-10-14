@@ -136,6 +136,10 @@ function GridDeformation{N}(u::NTuple{N}, knots::NTuple{N})
     GridDeformation(uf, knots)
 end
 
+# When knots is a vector
+GridDeformation{V<:AbstractVector}(u, knots::AbstractVector{V}) = GridDeformation(u, (knots...,))
+GridDeformation{R<:Real}(u, knots::AbstractVector{R}) = GridDeformation(u, (knots,))
+
 function convert_to_fixed{T}(u::Array{T}, sz=size(u))
     N = sz[1]
     if isbits(T)
