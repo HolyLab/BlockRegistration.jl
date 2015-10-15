@@ -43,7 +43,8 @@ function init(devlist)
     isempty(mdlist) || error("mdlist is not empty")
     for dev in devlist
         device(dev)
-        md = CuModule(joinpath(ENV["JULIAFUNCDIR"], "register_mismatch_cuda.ptx"), false)
+        thisdir = splitdir(@__FILE__)[1]
+        md = CuModule(joinpath(thisdir, "register_mismatch_cuda.ptx"), false)
         ptxdict[(dev, "components_func", Float32)] = CuFunction(md, "kernel_conv_components_float")
         ptxdict[(dev, "components_func", Float64)] = CuFunction(md, "kernel_conv_components_double")
         ptxdict[(dev, "conv_func", :pixels, Float32)] = CuFunction(md, "kernel_calcNumDenom_pixels_float")

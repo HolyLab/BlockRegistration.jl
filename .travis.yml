@@ -14,5 +14,5 @@ addons:
       - pkg-config
 script:
   - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
-  - julia -e 'Pkg.clone(pwd()); include(Pkg.dir("BlockRegistration","build","build.jl"))'
+  - julia -e 'Pkg.clone(pwd()); Pkg.build("BlockRegistration")'
   - julia -e 'Pkg.test("BlockRegistration")'
