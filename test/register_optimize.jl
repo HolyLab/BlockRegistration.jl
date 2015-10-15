@@ -1,5 +1,5 @@
 using FixedSizeArrays, AffineTransforms, Interpolations, Base.Test
-using RegisterCore, RegisterPenalty, RegisterDeformation
+using BlockRegistration, RegisterCore, RegisterPenalty, RegisterDeformation
 import RegisterOptimize
 
 include("register_test_utilities.jl")
