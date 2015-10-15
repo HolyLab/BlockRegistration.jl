@@ -10,3 +10,4 @@ CUDArt
 CUFFT
 HDF5
 JLD
+Reexport
