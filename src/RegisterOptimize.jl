@@ -3,7 +3,7 @@ __precompile__()
 module RegisterOptimize
 
 using MathProgBase, Ipopt, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers
-using RegisterCore, RegisterDeformation, RegisterMismatch, RegisterPenalty, RegisterFit
+using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base.Test
 
