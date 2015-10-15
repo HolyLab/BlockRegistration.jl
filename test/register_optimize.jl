@@ -174,6 +174,7 @@ mms = mismatcharrays(nums, denom)
 mmis = interpolate_mm!(mms; BC=InPlaceQ())
 
 u = randn(2, gridsize...)
+uclamp!(u, (m>>1, n>>1))
 ϕ = GridDeformation(u, knots)
 λ = 1000.0
 dp = AffinePenalty(knots, λ)
