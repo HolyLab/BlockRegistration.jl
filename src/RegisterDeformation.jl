@@ -2,7 +2,7 @@ __precompile__()
 
 module RegisterDeformation
 
-using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, HDF5, JLD
+using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, HDF5, JLD, ProgressMeter
 using RegisterUtilities
 using Base.Cartesian
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
@@ -519,7 +519,7 @@ function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, u;
     end
     destarray = Array(T, ssz)
     colons = [Colon() for d = 1:ndims(u)-1]
-    for i = 1:n
+    @showprogress 1 "Stacks:" for i = 1:n
         ϕ = GridDeformation(u[colons..., i], ssz)
         warp!(destarray, slice(img, "t", i), ϕ)
         warp_write(dest, destarray, i)
@@ -550,6 +550,7 @@ function _warp!{T}(::Type{T}, dest, img, u, nworkers)
     nextidx = 0
     getnextidx() = nextidx += 1
     writing_mutex = RemoteRef()
+    prog = Progress(n, 1, "Stacks:")
     @sync begin
         for i = 1:nworkers
             p = wpids[i]
@@ -562,11 +563,13 @@ function _warp!{T}(::Type{T}, dest, img, u, nworkers)
                     remotecall_fetch(p, warp!, warped, src, ϕ)
                     put!(writing_mutex, true)
                     warp_write(dest, warped, idx)
+                    update!(prog, idx)
                     take!(writing_mutex)
                 end
             end
         end
     end
+    finish!(prog)
     nothing
 end
 
