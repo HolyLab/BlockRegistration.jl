@@ -11,3 +11,4 @@ CUFFT
 HDF5
 JLD
 Reexport
+ForwardDiff
