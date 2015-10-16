@@ -93,6 +93,7 @@ function optimize_rigid(fixed, moving, A::AffineTransform, maxshift, SD = eye(nd
     # Set up and run the solver
     solver = IpoptSolver(hessian_approximation="limited-memory",
                          print_level=print_level,
+                         sb="yes",
                          tol=tol)
     m = SolverInterface.model(solver)
     ub = T[fill(pi, length(p0)-length(maxshift)); [maxshift...]]
@@ -312,7 +313,8 @@ end
 function find_opt{AP,M,N,Φ<:GridDeformation}(P::AffineQHessian{AP,M,N,Φ}, b, maxshift, x0)
     objective = InitialDefOpt(P, b)
     solver = IpoptSolver(hessian_approximation="limited-memory",
-                         print_level=0)
+                         print_level=0,
+                         sb="yes")
     m = SolverInterface.model(solver)
     T = eltype(b)
     n = length(b)
@@ -389,6 +391,7 @@ function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-6, print_lev
 
     solver = IpoptSolver(;hessian_approximation="limited-memory",
                          print_level=print_level,
+                         sb="yes",
                          tol=tol, kwargs...)
     m = SolverInterface.model(solver)
     ub1 = T[mxs...] - T(0.5001)
@@ -681,7 +684,7 @@ length(data)]`, and `0.1 <= width <= length(data)`.)
 function fit_sigmoid(data, bottom, top, center, width)
     length(data) >= 4 || error("Too few data points for sigmoidal fit")
     objective = SigmoidOpt(data)
-    solver = IpoptSolver(print_level=0)
+    solver = IpoptSolver(print_level=0, sb="yes")
     m = SolverInterface.model(solver)
     x0 = Float64[bottom, top, center, width]
     mn, mx = extrema(data)

@@ -1,4 +1,4 @@
-import RegisterFit
+import BlockRegistration, RegisterFit
 using Base.Test, AffineTransforms, Interpolations
 using RegisterCore
 
