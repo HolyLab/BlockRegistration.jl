@@ -527,8 +527,10 @@ function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, u;
     nothing
 end
 
+warp!{T,R<:Real}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, u::AbstractArray{R}; kwargs...) = warp!(T, dest, img, convert_to_fixed(u); kwargs...)
+
 warp!(dest::Union{HDF5Dataset,JLD.JldDataset}, img, u; nworkers=1) =
-    warp(eltype(dest), dest, img, u; nworkers=nworkers)
+    warp!(eltype(dest), dest, img, u; nworkers=nworkers)
 
 function _warp!{T}(::Type{T}, dest, img, u, nworkers)
     n = nimages(img)

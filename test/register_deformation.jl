@@ -233,7 +233,18 @@ C = RegisterDeformation.warpgrid(ϕ, showidentity=true)
 o = ones(Float32, 5, 5)
 A = o .* reshape(1:7, (1,1,7))
 img = Image(A, timedim=3)
+# With Array{Vec}
 uarray = reinterpret(Vec{2,Float64}, zeros(2,3,3,7), (3,3,7))
+fn = tempname()
+open(fn, "w") do io
+    RegisterDeformation.warp!(Float32, io, img, uarray)
+end
+warped = open(fn, "r") do io
+    read(io, Float32, size(img))
+end
+@test warped == img
+# With Array{Real}
+uarray = zeros(2,3,3,7)
 fn = tempname()
 open(fn, "w") do io
     RegisterDeformation.warp!(Float32, io, img, uarray)
