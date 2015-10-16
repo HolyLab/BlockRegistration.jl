@@ -1,6 +1,6 @@
 using FixedSizeArrays, AffineTransforms, Interpolations, Base.Test
-using BlockRegistration, RegisterCore, RegisterPenalty, RegisterDeformation
-import RegisterOptimize
+import BlockRegistration, RegisterOptimize
+using RegisterCore, RegisterPenalty, RegisterDeformation
 
 include("register_test_utilities.jl")
 

@@ -1,6 +1,6 @@
 using Base.Test, DualNumbers, AffineTransforms, FixedSizeArrays, Interpolations
+import BlockRegistration, RegisterPenalty
 using RegisterCore, RegisterDeformation
-import RegisterPenalty
 RP = RegisterPenalty
 
 gridsize = (9,7)

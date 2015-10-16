@@ -1,4 +1,4 @@
-import RegisterCore
+import BlockRegistration, RegisterCore
 using Base.Test
 
 nd = RegisterCore.NumDenom(3.5,10)

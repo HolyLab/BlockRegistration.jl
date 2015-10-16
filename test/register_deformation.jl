@@ -1,4 +1,4 @@
-import RegisterDeformation
+import BlockRegistration, RegisterDeformation
 using AffineTransforms, Interpolations, ColorTypes, ForwardDiff, FixedSizeArrays, Images
 using Base.Test
 

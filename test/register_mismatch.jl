@@ -1,4 +1,4 @@
-import RegisterMismatch
+import BlockRegistration, RegisterMismatch
 using CenterIndexedArrays, RegisterCore
 using Base.Test
 

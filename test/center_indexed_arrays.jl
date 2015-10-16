@@ -1,3 +1,4 @@
+import BlockRegistration
 using CenterIndexedArrays, Base.Test
 
 CenterIndexedArray(Float32, 3, 5)

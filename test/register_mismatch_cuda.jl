@@ -1,7 +1,7 @@
-using Base.Test, RegisterCore
-using Compat
+using Base.Test
 import CUDArt
-import RegisterMismatchCuda
+import BlockRegistration, RegisterMismatchCuda
+using RegisterCore
 
 function run_components(f, A)
     G1 = CUDArt.CudaPitchedArray(A)
