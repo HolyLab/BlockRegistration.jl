@@ -4,7 +4,7 @@ module RegisterDeformation
 
 using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, HDF5, JLD, ProgressMeter
 using RegisterUtilities
-using Base.Cartesian
+using Base: Cartesian, tail
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
 
 export
@@ -59,6 +59,8 @@ RegisterDeformation
 abstract AbstractDeformation{T,N}
 Base.eltype{T,N}(::Type{AbstractDeformation{T,N}}) = T
 Base.ndims{T,N}(::Type{AbstractDeformation{T,N}}) = N
+Base.eltype{D<:AbstractDeformation}(::Type{D}) = eltype(super(D))
+Base.ndims{D<:AbstractDeformation}(::Type{D}) = ndims(super(D))
 
 """
 `ϕ = GridDeformation(u::Array{FixedVector}, dims)` creates a
@@ -125,7 +127,7 @@ end
 function GridDeformation{T<:Number,N}(u::Array{T}, knots::NTuple{N})
     ndims(u) == N+1 || error("Need $(N+1) dimensions for $N-dimensional deformations")
     size(u,1) == N || error("First dimension of u must be of length $N")
-    uf = convert_to_fixed(u)
+    uf = convert_to_fixed(Vec{N,T}, u, tail(size(u)))
     GridDeformation(uf, knots)
 end
 
@@ -143,10 +145,15 @@ GridDeformation{R<:Real}(u, knots::AbstractVector{R}) = GridDeformation(u, (knot
 
 function convert_to_fixed{T}(u::Array{T}, sz=size(u))
     N = sz[1]
+    convert_to_fixed(Vec{N, T}, u, tail(sz))
+end
+
+# Unlike the one above, this is type-stable
+function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u, sz)
     if isbits(T)
-        uf = reinterpret(Vec{N,T}, u, Base.tail(sz))
+        uf = reinterpret(Vec{N,T}, u, sz)
     else
-        uf = Array(Vec{N,T}, Base.tail(sz))
+        uf = Array(Vec{N,T}, sz)
         copy_ctf!(uf, u)
     end
     uf
@@ -368,8 +375,6 @@ WarpedArray(data, ϕ::GridDeformation) = WarpedArray(to_etp(data), ϕ)
 
 Base.size(A::WarpedArray) = size(A.data)
 Base.size(A::WarpedArray, i::Integer) = size(A.data, i)
-Base.ndims{T,N}(A::WarpedArray{T,N}) = N
-Base.eltype{T}(A::WarpedArray{T}) = T
 
 @generated function Base.getindex{T,N}(W::WarpedArray{T,N}, x::Number...)
     length(x) == N || error("Must use $N indexes")
