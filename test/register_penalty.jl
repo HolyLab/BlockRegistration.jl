@@ -1,4 +1,4 @@
-using Base.Test, DualNumbers, AffineTransforms, FixedSizeArrays, Interpolations
+using Base.Test, DualNumbers, ForwardDiff, AffineTransforms, FixedSizeArrays, Interpolations
 import BlockRegistration, RegisterPenalty
 using RegisterCore, RegisterDeformation
 RP = RegisterPenalty
@@ -209,3 +209,18 @@ for nd = 1:3
 
     @test_throws ErrorException RP.penalty!(g, interpolate(ϕ), ϕ_old, dp, mmis)
 end
+
+###
+### Temporal penalty
+###
+gsize = (3,4)
+n = 3
+x = randn(2*prod(gsize)*n)
+knots = (linspace(1,100,3), linspace(1,95,4))
+
+cnvt = x->RegisterPenalty.vec2ϕs(x, gsize, n, knots)
+ϕs = cnvt(x)
+g = similar(x)
+val = RegisterPenalty.penalty!(g, 1.0, ϕs)
+gfunc = ForwardDiff.gradient(x->RegisterPenalty.penalty(1.0, cnvt(x)))
+@test_approx_eq g gfunc(x)

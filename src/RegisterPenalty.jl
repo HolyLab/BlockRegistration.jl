@@ -303,6 +303,68 @@ function penalty!(g, dp::AffinePenalty, ϕ_c, g_c)
     ret
 end
 
+###
+### Temporal penalty
+###
+"""
+`penalty!(g, λt, ϕs)` calculates the temporal penalty
+```
+   (1/2)λt ∑_i (ϕ_{i+1} - ϕ_i)^2
+```
+for a vector `ϕ` of deformations. `g`, if not `nothing`, should be a
+single real-valued vector with number of entries corresponding to all
+of the `u` arrays in all of `ϕs`.
+"""
+function penalty!{D<:GridDeformation}(g, λt::Real, ϕs::Vector{D})
+    if g == nothing || isempty(g)
+        return penalty(λt, ϕs)
+    end
+    ngrid = length(first(ϕs).u)
+    Ngrid = ndims(D)*ngrid
+    length(g) == length(ϕs)*Ngrid || throw(DimensionMismatch("g's length $(length(g)) inconsistent with ($(length(ϕs)), $Ngrid)"))
+    s = zero(eltype(D))
+    gfv = gri(D, g)
+    λt2 = λt/2
+    for i = 1:length(ϕs)-1
+        ϕ  = ϕs[i]
+        ϕp = ϕs[i+1]
+        goffset = ngrid*(i-1)
+        for k = 1:ngrid
+            du = ϕp.u[k] - ϕ.u[k]
+            dv = λt*du
+            gfv[goffset+k] -= dv
+            gfv[goffset+ngrid+k] += dv
+            s += λt2*sumabs2(du)
+        end
+    end
+    s
+end
+
+function penalty{D<:GridDeformation}(λt::Real, ϕs::Vector{D})
+    s = zero(eltype(D))
+    ngrid = length(first(ϕs).u)
+    λt2 = λt/2
+    for i = 1:length(ϕs)-1
+        ϕ  = ϕs[i]
+        ϕp = ϕs[i+1]
+        for k = 1:ngrid
+            du = ϕp.u[k] - ϕ.u[k]
+            s += λt2*sumabs2(du)
+        end
+    end
+    s
+end
+
+function gri{T,N,A,L}(::Type{GridDeformation{T,N,A,L}}, g)
+    reinterpret(Vec{N,T}, g, (div(length(g), N),))
+end
+
+function vec2ϕs{T,N}(x::Array{T}, gridsize::NTuple{N,Int}, n, knots)
+    xr = RegisterDeformation.convert_to_fixed(Vec{N,T}, x, (gridsize..., n))
+    colons = ntuple(d->Colon(), N)::NTuple{N,Colon}
+    [GridDeformation(slice(xr, (colons..., i)), knots) for i = 1:n]
+end
+
 """
 `mmi = interpolate_mm!(mm)` prepares a MismatchArray (returned by,
 e.g., RegisterMismatch) for sub-pixel interpolation.  The original
