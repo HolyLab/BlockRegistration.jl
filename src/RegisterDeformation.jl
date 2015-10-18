@@ -120,7 +120,7 @@ function GridDeformation{FV<:FixedVector,N,L<:Integer}(u::AbstractArray{FV,N},
     T = eltype(FV)
     length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires Vec{$N,T}"))
     knots = ntuple(d->linspace(1,dims[d],size(u,d)), N)
-    GridDeformation{T,N,typeof(u),typeof(knots[1])}(u, knots)
+    GridDeformation{T,N,typeof(u),LinSpace{Float64}}(u, knots)
 end
 
 # Construct from a plain array

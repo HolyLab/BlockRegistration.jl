@@ -19,15 +19,56 @@ offset = tfprod.offset
 ###
 ### Global-optimum initial guess
 ###
-function initial_guess_direct(A, cs, Qs)
+function build_Ac_b(A, cs::Matrix, Qs::Matrix)
     b = zeros(size(A,1))
     Ac = copy(A)
     for i = 1:length(Qs)
         Ac[2i-1:2i,2i-1:2i] += Qs[i]
         b[2i-1:2i] = Qs[i]*cs[i]
     end
+    Ac, b
+end
+
+function initial_guess_direct(A, cs::Matrix, Qs::Matrix)
+    Ac, b = build_Ac_b(A, cs, Qs)
     x = Ac\b
-    reinterpret(Vec{2,Float64}, x, gridsize)
+    reinterpret(Vec{2,Float64}, x, size(Qs))
+end
+
+function build_Ac_b{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
+    n = size(Qs,3)
+    l = size(A,1)
+    b = zeros(l*n)
+    Ac = zeros(eltype(A), l*n, l*n)
+    for i = 1:n
+        Ac[(i-1)*l+1:i*l, (i-1)*l+1:i*l] = A
+        if i == 1 || i == n
+            for k = 1:l
+                Ac[(i-1)*l+k,(i-1)*l+k] += λt
+            end
+        else
+            for k = 1:l
+                Ac[(i-1)*l+k,(i-1)*l+k] += 2*λt
+            end
+        end
+    end
+    for i = 1:n-1
+        for k = 1:l
+            Ac[(i-1)*l+k, i*l+k] -= λt
+            Ac[i*l+k, (i-1)*l+k] -= λt
+        end
+    end
+    for i = 1:length(Qs)
+        Ac[2i-1:2i,2i-1:2i] += Qs[i]
+        b[2i-1:2i] = Qs[i]*cs[i]
+    end
+    Ac, b
+end
+
+function initial_guess_direct{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
+    Ac, b = build_Ac_b(A, λt, cs, Qs)
+    x = Ac\b
+    reinterpret(Vec{2,Float64}, x, size(Qs))
 end
 
 function build_A(knots, λ)
@@ -54,8 +95,13 @@ for (i,knot) in enumerate(eachknot(knots))
     cs[i] = tfm*v-v
     Qs[i] = eye(2,2)
 end
+P = RegisterOptimize.AffineQHessian(ap, Qs, identity)
+Ac, b = build_Ac_b(A, cs, Qs);
+v = zeros(size(P,1)); v[1] = 1
+@test_approx_eq_eps P*v vec(Ac[1,:]) 0.0001
+v = zeros(size(P,1)); v[4] = 1
+@test_approx_eq_eps P*v vec(Ac[4,:]) 0.0001
 ux = initial_guess_direct(A, cs, Qs)
-#u = @inferred(RegisterOptimize.initial_guess(ap, cs, Qs))
 u, isconverged = @inferred(RegisterOptimize.initial_deformation(ap, cs, Qs))
 @test isconverged
 @test size(u) == size(ux)
@@ -72,6 +118,12 @@ for I in CartesianRange(gridsize)
     Qs[I] = QF'*QF
     cs[I] = randn(2)
 end
+P = RegisterOptimize.AffineQHessian(ap, Qs, identity)
+Ac, b = build_Ac_b(A, cs, Qs);
+v = zeros(size(P,1)); v[1] = 1
+@test_approx_eq_eps P*v vec(Ac[1,:]) 0.0001
+v = zeros(size(P,1)); v[4] = 1
+@test_approx_eq_eps P*v vec(Ac[4,:]) 0.0001
 ux = initial_guess_direct(A, cs, Qs)
 u, isconverged = RegisterOptimize.initial_deformation(ap, cs, Qs)
 @test isconverged
@@ -80,6 +132,35 @@ u, isconverged = RegisterOptimize.initial_deformation(ap, cs, Qs)
 for I in eachindex(u)
     @test_approx_eq_eps u[I] ux[I] 1e-3
 end
+
+# Random initialization with a temporal penalty
+Qs = Array(Mat{2,2,Float64}, gridsize..., 5)
+cs = Array(Vec{2,Float64}, gridsize..., 5)
+for I in CartesianRange(size(Qs))
+    QF = rand(2,2)
+    Qs[I] = QF'*QF
+    cs[I] = randn(2)
+end
+csr = convert(Array{Vector{Float64}, 3}, cs)
+Qsr = convert(Array{Matrix{Float64}, 3}, Qs)
+λt = 1.0
+P = RegisterOptimize.TimeHessian(RegisterOptimize.AffineQHessian(ap, Qs, identity), λt)
+Ac, b = build_Ac_b(A, λt, csr, Qsr)
+v = zeros(size(P,1)); v[1] = 1
+@test_approx_eq_eps P*v vec(Ac[1,:]) 0.0001
+v = zeros(size(P,1)); v[4] = 1
+@test_approx_eq_eps P*v vec(Ac[4,:]) 0.0001
+v = zeros(size(P,1)); v[end] = 1
+@test_approx_eq_eps P*v vec(Ac[end,:]) 0.0001
+ux = initial_guess_direct(A, 1.0, csr, Qsr)
+u, isconverged = RegisterOptimize.initial_deformation(ap, 1.0, cs, Qs)
+@test isconverged
+@test size(u) == size(ux)
+@test eltype(u) == Vec{2,Float64}
+for I in eachindex(u)
+    @test_approx_eq_eps u[I] ux[I] 1e-3
+end
+
 
 # # With composition
 # # We use a larger grid because the edges are suspect
@@ -174,7 +255,7 @@ mms = mismatcharrays(nums, denom)
 mmis = interpolate_mm!(mms; BC=InPlaceQ())
 
 u = randn(2, gridsize...)
-uclamp!(u, (m>>1, n>>1))
+RegisterFit.uclamp!(u, (m>>1, n>>1))
 ϕ = GridDeformation(u, knots)
 λ = 1000.0
 dp = AffinePenalty(knots, λ)

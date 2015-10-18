@@ -194,7 +194,11 @@ where `ϕ(u0)` is the deformation associated with `u0`.
 
 If `ϕ_old` is not the identity, it must be interpolating.
 """
-function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
+function initial_deformation(ap::AffinePenalty, cs, Qs)
+    _initial_deformation(ap, cs, Qs)
+end
+
+function _initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
     b = prep_b(T, cs, Qs)
     # A = to_full(ap, Qs)
     # F = svdfact(A)
@@ -215,6 +219,13 @@ function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
     convert_to_fixed(Vec{N,T}, x, size(cs)), isconverged
 end
 
+function initial_deformation{T,N,V<:Vec,M<:Mat}(ap::AffinePenalty{T,N}, cs::AbstractArray{V}, Qs::AbstractArray{M})
+    Tv = eltype(V)
+    eltype(M) == Tv || error("element types of cs ($(eltype(V))) and Qs ($(eltype(M))) must match")
+    size(M,1) == size(M,2) == length(V) || throw(DimensionMismatch("size $(size(M)) of Qs matrices is inconsistent with cs vectors of size $(size(V))"))
+    _initial_deformation(convert(AffinePenalty{Tv,N}, ap), cs, Qs)
+end
+
 function to_full{T,N}(ap::AffinePenalty{T,N}, Qs)
     FF = ap.F*ap.F'
     nA = N*size(FF,1)
@@ -231,7 +242,7 @@ end
 
 function prep_b{T}(::Type{T}, cs, Qs)
     n = prod(size(Qs))
-    N = length(first(cs))
+    N = length(first(cs))::Int
     b = zeros(T, N*n)
     for i = 1:n
         b[(i-1)*N+1:i*N] = Qs[i]*cs[i]
@@ -251,8 +262,7 @@ type AffineQHessian{AP<:AffinePenalty,M<:Mat,N,Φ}
     ϕ_old::Φ
 end
 
-function AffineQHessian{T}(ap::AffinePenalty{T}, Qs::AbstractArray, ϕ_old)
-    N = ndims(Qs)
+function AffineQHessian{T,TQ,N}(ap::AffinePenalty{T}, Qs::AbstractArray{TQ,N}, ϕ_old)
     AffineQHessian{typeof(ap),Mat{N,N,T},N,typeof(ϕ_old)}(ap, Qs, ϕ_old)
 end
 
@@ -264,15 +274,15 @@ Base.size(P::AffineQHessian, d) = length(P.Qs)*size(first(P.Qs),1)
 # for the objective in the doc text for initial_deformation.
 function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     gridsize = size(P.Qs)
-    n = prod(gridsize)
-    u = convert_to_fixed(Vec{N,T}, x, gridsize)
+    u = convert_to_fixed(Vec{N,T}, x, size(P.Qs))
     g = similar(u)
     λ = P.ap.λ
-    P.ap.λ = λ*n/2
+    nspatialgrid = size(P.ap.F, 1)
+    P.ap.λ = λ*nspatialgrid/2   # undo the scaling in penalty!
     affine_part!(g, P, u)
     P.ap.λ = λ
     sumQ = zero(T)
-    for i = 1:n
+    for i = 1:length(u)
         g[i] += P.Qs[i] * u[i]
         sumQ += trace(P.Qs[i])
     end
@@ -280,15 +290,39 @@ function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     if sumQ == 0
         sumQ = one(T)
     end
-    fac = cbrt(eps(T))*sumQ/n
-    for i = 1:n
+    fac = cbrt(eps(T))*sumQ/length(u)
+    for i = 1:length(u)
         g[i] += fac*u[i]
     end
     reinterpret(T, g, size(x))
 end
 
-affine_part!(g, P, u) = penalty!(g, P.ap, u)
+affine_part!(g, P, u) = _affine_part!(g, P.ap, u)
+function _affine_part!{T,N}(g, ap::AffinePenalty{T,N}, u)
+    local s
+    if ndims(u) == N
+        s = penalty!(g, ap, u)
+    elseif ndims(u) == N+1
+        # Last dimension is time
+        n = size(u)[end]
+        colons = ntuple(ColonFun(), Val{N})
+        for i = 1:n
+            indexes = (colons..., i)
+            snew = penalty!(slice(g, indexes), ap, slice(u, indexes))
+            if i == 1
+                s = snew
+            else
+                s += snew
+            end
+        end
+    else
+        throw(DimensionMismatch("unknown dimensionality $(ndims(u)) for $N dimensions"))
+    end
+    s
+end
 
+immutable ColonFun end
+Base.call(::ColonFun, ::Int) = Colon()
 
 function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs, ϕ_old, maxshift)
     error("This is broken, don't use it")
@@ -576,6 +610,49 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     quality = val/(top-bottom)^2/length(datapenalty_all)
     ϕ_all[idx], penalty_all[idx], λ_all[idx], datapenalty_all, quality
 end
+
+###
+### Whole-experiment optimization with a temporal roughness penalty
+###
+function initial_deformation{T,N,V<:Vec,M<:Mat}(ap::AffinePenalty{T,N}, λt, cs::AbstractArray{V}, Qs::AbstractArray{M})
+    Tv = eltype(V)
+    eltype(M) == Tv || error("element types of cs ($(eltype(V))) and Qs ($(eltype(M))) must match")
+    length(V) == N || throw(DimensionMismatch("Dimensionality $N of ap does not match $(length(V))"))
+    size(M,1) == size(M,2) == N || throw(DimensionMismatch("size $(size(M)) of Qs matrices is inconsistent with cs vectors of size $(size(V))"))
+    apc = convert(AffinePenalty{Tv,N}, ap)
+    b = prep_b(Tv, cs, Qs)
+    P = TimeHessian(AffineQHessian(apc, Qs, identity), convert(Tv, λt))
+    x, isconverged = find_opt(P, b)
+    convert_to_fixed(Vec{N,Tv}, x, size(cs)), isconverged
+end
+
+immutable TimeHessian{AQH<:AffineQHessian,T}
+    aqh::AQH
+    λt::T
+end
+
+Base.eltype{AQH,T}(::Type{TimeHessian{AQH,T}}) = eltype(AQH)
+Base.eltype(P::TimeHessian) = eltype(typeof(P))
+Base.size(P::TimeHessian, d) = size(P.aqh, d)
+
+function (*){AQH}(P::TimeHessian{AQH}, x::AbstractVector)
+    y = P.aqh*x
+    ϕs = vec2vecϕ(P.aqh.Qs, x)
+    penalty!(y, P.λt, ϕs)
+    y
+end
+
+function vec2vecϕ{T,N}(Qs::Array{Mat{N,N,T}}, x::AbstractVector{T})
+    xf = convert_to_fixed(Vec{N,T}, x, size(Qs))
+    _vec2vecϕ(xf, size(Qs)[1:end-1])
+end
+
+@noinline function _vec2vecϕ{N}(x::AbstractArray, sz::NTuple{N,Int})
+    colons = ntuple(ColonFun(), Val{N})
+    [GridDeformation(slice(x, (colons..., i)), sz) for i = 1:size(x)[end]]
+end
+
+
 
 ###
 ### Mismatch-based optimization of affine transformation
