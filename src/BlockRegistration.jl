@@ -9,6 +9,8 @@ if !any(LOAD_PATH .== thisdir)
     push!(LOAD_PATH, thisdir)
 end
 
+include("fixedsizearrays_extras.jl")
+
 @reexport using CenterIndexedArrays
 @reexport using RegisterCore
 @reexport using RegisterDeformation
