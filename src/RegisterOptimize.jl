@@ -212,7 +212,7 @@ function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
     # computed efficiently.)
     P = AffineQHessian(ap, Qs, identity)
     x, isconverged = find_opt(P, b)
-    convert_to_fixed(x, (N,size(cs)...))::Array{Vec{N,T},N}, isconverged
+    convert_to_fixed(Vec{N,T}, x, size(cs)), isconverged
 end
 
 function to_full{T,N}(ap::AffinePenalty{T,N}, Qs)
@@ -265,7 +265,7 @@ Base.size(P::AffineQHessian, d) = length(P.Qs)*size(first(P.Qs),1)
 function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     gridsize = size(P.Qs)
     n = prod(gridsize)
-    u = convert_to_fixed(x, (N,gridsize...)) #reinterpret(Vec{N,T}, x, gridsize)
+    u = convert_to_fixed(Vec{N,T}, x, gridsize)
     g = similar(u)
     λ = P.ap.λ
     P.ap.λ = λ*n/2

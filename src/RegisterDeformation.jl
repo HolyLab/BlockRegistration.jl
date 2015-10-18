@@ -170,8 +170,8 @@ end
     end
 end
 
-function convert_from_fixed{N,T}(uf::Array{Vec{N,T}}, sz=size(uf))
-    if isbits(T)
+function convert_from_fixed{N,T}(uf::AbstractArray{Vec{N,T}}, sz=size(uf))
+    if isbits(T) && isa(uf, Array)
         u = reinterpret(T, uf, (N, sz...))
     else
         u = Array(T, (N, sz...))
