@@ -8,6 +8,10 @@ maxshift = (3,3)
 imgsize = (1000,1002)
 knots = map(d->linspace(1,imgsize[d],gridsize[d]), 1:length(gridsize))
 dp = RegisterPenalty.AffinePenalty(knots, 1.0)
+@test typeof(dp) == RegisterPenalty.AffinePenalty{Float64, 2}
+# Since the constructor performs matrix algebra on an array input,
+# test that `convert` doesn't mangle F.
+@test_approx_eq_eps convert(RegisterPenalty.AffinePenalty{Float32,2}, dp).F dp.F 1e-7
 
 # Zero penalty for translations
 ϕ_new = tform2deformation(tformtranslate([0.3,0.05]), imgsize, gridsize)

@@ -225,6 +225,8 @@ type AffinePenalty{T,N} <: DeformationPenalty{T}
     F::Matrix{T}   # geometry data for the affine-residual penalty
     λ::T           # regularization coefficient
 
+    AffinePenalty(F::Matrix{T}, λ::T, _) = new(F, λ)
+
     function AffinePenalty(knots::NTuple{N}, λ)
         gridsize = map(length, knots)
         C = Array(Float64, prod(gridsize), N+1)
@@ -250,6 +252,7 @@ AffinePenalty{V<:AbstractVector,N}(knots::NTuple{N,V}, λ) = AffinePenalty{eltyp
 AffinePenalty{V<:AbstractVector}(knots::AbstractVector{V}, λ) = AffinePenalty{eltype(V),length(knots)}((knots...), λ)
 AffinePenalty{T}(knots::AbstractMatrix{T}, λ) = AffinePenalty{T,size(knots,1)}(knots, λ)
 
+Base.convert{T,N}(::Type{AffinePenalty{T,N}}, ap::AffinePenalty) = AffinePenalty{T,N}(convert(Matrix{T}, ap.F), convert(T, ap.λ), 0)
 
 """
 `p = penalty!(g, dp::DeformationPenalty, ϕ_c, [g_c])` computes the
@@ -323,7 +326,7 @@ function penalty!{D<:GridDeformation}(g, λt::Real, ϕs::Vector{D})
     Ngrid = ndims(D)*ngrid
     length(g) == length(ϕs)*Ngrid || throw(DimensionMismatch("g's length $(length(g)) inconsistent with ($(length(ϕs)), $Ngrid)"))
     s = zero(eltype(D))
-    gfv = gri(D, g)
+    gfv = convert_to_fixed(D, g)
     λt2 = λt/2
     for i = 1:length(ϕs)-1
         ϕ  = ϕs[i]
@@ -355,7 +358,7 @@ function penalty{D<:GridDeformation}(λt::Real, ϕs::Vector{D})
     s
 end
 
-function gri{T,N,A,L}(::Type{GridDeformation{T,N,A,L}}, g)
+function RegisterDeformation.convert_to_fixed{T,N,A,L}(::Type{GridDeformation{T,N,A,L}}, g::Array{T})
     reinterpret(Vec{N,T}, g, (div(length(g), N),))
 end
 
