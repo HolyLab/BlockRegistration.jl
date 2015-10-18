@@ -245,9 +245,19 @@ function prep_b{T}(::Type{T}, cs, Qs)
     N = length(first(cs))::Int
     b = zeros(T, N*n)
     for i = 1:n
-        b[(i-1)*N+1:i*N] = Qs[i]*cs[i]
+        _copy!(b, (i-1)*N+1:i*N, Qs[i]*cs[i])
     end
     b
+end
+
+# Overloading setindex! for Vec introduces too many ambiguities,
+# so we define this instead.
+_copy!(dest, rng, src::AbstractVector) = dest[rng] = src
+function _copy!(dest, rng, src::Vec)
+    for (idest, isrc) in zip(rng, 1:length(src))
+        dest[idest] = src[isrc]
+    end
+    src
 end
 
 function find_opt(P, b)
@@ -651,7 +661,6 @@ end
     colons = ntuple(ColonFun(), Val{N})
     [GridDeformation(slice(x, (colons..., i)), sz) for i = 1:size(x)[end]]
 end
-
 
 
 ###
