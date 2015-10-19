@@ -100,6 +100,43 @@ function penalty!{T<:Number}(g::Array{T}, ϕ, ϕ_old, dp::DeformationPenalty, mm
 end
 
 
+"""
+`p = penalty!(gs, ϕs, ϕs_old, dp, λt, mmis, [keeps=trues(size(mmis))])`
+evaluates the total penalty for temporal sequence of deformations
+`ϕs`, using the temporal sequence of mismatch data `mmis`.  `λt` is
+the temporal roughness penalty coefficient.
+"""
+function penalty!{D<:AbstractDeformation}(gs, ϕs::AbstractVector{D}, ϕs_old, dp::DeformationPenalty, λt::Number, mmis::AbstractArray, keep = trues(size(mmis)))
+    ntimes = length(ϕs)
+    size(mmis)[end] == ntimes || throw(DimensionMismatch("Number of deformations $ntimes does not agree with mismatch data of size $(size(mmis))"))
+    s = _penalty!(gs, ϕs, ϕs_old, dp, mmis, keep, 1)
+    for i = 2:ntimes
+        s += _penalty!(gs, ϕs, ϕs_old, dp, mmis, keep, i)
+    end
+    s + penalty!(gs, λt, ϕs)
+end
+
+
+function penalty!{T<:Number,D<:AbstractDeformation}(gs::Array{T}, ϕs::AbstractVector{D}, ϕs_old, dp::DeformationPenalty, λt::Number, mmis::AbstractArray, keep = trues(size(mmis)))
+    gf = RegisterDeformation.convert_to_fixed(gs, (ndims(dp), size(first(ϕs).u)..., length(ϕs)))
+    penalty!(gf, ϕs, ϕs_old, dp, λt, mmis, keep)
+end
+
+function _penalty!{T,N}(gs, ϕs, ϕs_old, dp::DeformationPenalty{T,N}, mmis, keeps, i)
+    colons = ntuple(ColonFun(), Val{N})
+    indexes = (colons..., i)
+    mmi = slice(mmis, indexes)
+    keep = slice(keeps, indexes)
+    calc_gradient = gs != nothing && !isempty(gs)
+    g = calc_gradient ? slice(gs, indexes) : nothing
+    if isa(ϕs_old, AbstractVector)
+        penalty!(g, ϕs[i], ϕs_old[i], dp, mmi, keep)
+    else
+        penalty!(g, ϕs[i], ϕs_old, dp, mmi, keep)
+    end
+end
+
+
 ################
 # Data penalty #
 ################
@@ -339,10 +376,11 @@ function penalty!{D<:GridDeformation}(g, λt::Real, ϕs::Vector{D})
         return penalty(λt, ϕs)
     end
     ngrid = length(first(ϕs).u)
-    Ngrid = ndims(D)*ngrid
-    length(g) == length(ϕs)*Ngrid || throw(DimensionMismatch("g's length $(length(g)) inconsistent with ($(length(ϕs)), $Ngrid)"))
+    if length(g) != length(ϕs)*ngrid
+        gsize = (size(first(ϕs).u)..., length(ϕs))
+        throw(DimensionMismatch("g's length $(length(g)) inconsistent with $gsize"))
+    end
     s = zero(eltype(D))
-    gfv = convert_to_fixed(D, g)
     λt2 = λt/2
     for i = 1:length(ϕs)-1
         ϕ  = ϕs[i]
@@ -351,12 +389,19 @@ function penalty!{D<:GridDeformation}(g, λt::Real, ϕs::Vector{D})
         for k = 1:ngrid
             du = ϕp.u[k] - ϕ.u[k]
             dv = λt*du
-            gfv[goffset+k] -= dv
-            gfv[goffset+ngrid+k] += dv
+            g[goffset+k] -= dv
+            g[goffset+ngrid+k] += dv
             s += λt2*sumabs2(du)
         end
     end
     s
+end
+
+function penalty!{T<:Number, D<:GridDeformation}(g::Array{T}, λt::Real, ϕs::Vector{D})
+    N = ndims(first(ϕs))
+    sz = size(first(ϕs).u)
+    gf = RegisterDeformation.convert_to_fixed(g, (N, sz..., length(ϕs)))
+    penalty!(gf, λt, ϕs)
 end
 
 function penalty{D<:GridDeformation}(λt::Real, ϕs::Vector{D})

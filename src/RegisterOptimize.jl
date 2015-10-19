@@ -254,8 +254,8 @@ end
 # so we define this instead.
 _copy!(dest, rng, src::AbstractVector) = dest[rng] = src
 function _copy!(dest, rng, src::Vec)
-    for (idest, isrc) in zip(rng, 1:length(src))
-        dest[idest] = src[isrc]
+    for (idest, s) in zip(rng, src)
+        dest[idest] = s
     end
     src
 end
@@ -422,10 +422,13 @@ It's recommended that you verify that `fval < fval0`; if it's not
 true, consider adding `mu_strategy="monotone", mu_init=??` to the
 options (where the value of ?? might require some experimentation; a
 starting point might be 1e-4).
-
 """
 function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-6, print_level=0, kwargs...)
     objective = DeformOpt(ϕ, ϕ_old, dp, mmis)
+    _optimize!(objective, ϕ, dp, mmis, tol, print_level; kwargs...)
+end
+
+function _optimize!(objective, ϕ, dp, mmis, tol, print_level; kwargs...)
     uvec = u_as_vec(ϕ)
     T = eltype(uvec)
     mxs = maxshift(first(mmis))
@@ -436,7 +439,7 @@ function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-6, print_lev
                          tol=tol, kwargs...)
     m = SolverInterface.model(solver)
     ub1 = T[mxs...] - T(0.5001)
-    ub = repeat(ub1, outer=[length(ϕ.u)])
+    ub = repeat(ub1, outer=[div(length(uvec), length(ub1))])
     SolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
     SolverInterface.setwarmstart!(m, uvec)
     fval0 = SolverInterface.eval_f(objective, uvec)
@@ -447,19 +450,37 @@ function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-6, print_lev
     stat == :Optimal || warn("Solution was not optimal")
     uopt = SolverInterface.getsolution(m)
     fval = SolverInterface.getobjval(m)
-    copy!(uvec, uopt)
+    _copy!(ϕ, uopt)
     ϕ, fval, fval0
 end
 
-function u_as_vec(ϕ)
-    T = eltype(eltype(ϕ.u))
-    N = length(eltype(ϕ.u))
-    uvec = reinterpret(T, ϕ.u, (N*length(ϕ.u),))
+function u_as_vec{T,N}(ϕ::GridDeformation{T,N})
+    n = length(ϕ.u)
+    uvec = reinterpret(T, ϕ.u, (n*N,))
 end
 
 function vec_as_u{T,N}(g::Array{T}, ϕ::GridDeformation{T,N})
     reinterpret(Vec{N,T}, g, size(ϕ.u))
 end
+
+function _copy!(ϕ::GridDeformation, x)
+    uvec = u_as_vec(ϕ)
+    copy!(uvec, x)
+end
+
+# Sequence of deformations
+function u_as_vec{D<:GridDeformation}(ϕs::Vector{D})
+    T = eltype(D)
+    N = ndims(D)
+    ngrid = length(first(ϕs).u)
+    n = N*ngrid
+    uvec = Array(T, n*length(ϕs))
+    for (i, ϕ) in enumerate(ϕs)
+        copy!(uvec, (i-1)*n+1, reinterpret(T, ϕ.u, (n,)), 1, n)
+    end
+    uvec
+end
+
 
 type DeformOpt{D,Dold,DP,M} <: GradOnlyBoundsOnly
     ϕ::D
@@ -478,6 +499,42 @@ function SolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(vec_as_u(grad_f, d.ϕ), d.ϕ, d.ϕ_old, d.dp, d.mmis)
+end
+
+
+# With temporal penalty
+function optimize!(ϕs, ϕs_old, dp::DeformationPenalty, λt, mmis; tol=1e-6, print_level=0, kwargs...)
+    objective = DeformTseriesOpt(ϕs, ϕs_old, dp, λt, mmis)
+    _optimize!(objective, ϕs, dp, mmis, tol, print_level; kwargs...)
+end
+
+type DeformTseriesOpt{D,Dsold,DP,T,M} <: GradOnlyBoundsOnly
+    ϕs::Vector{D}
+    ϕs_old::Dsold
+    dp::DP
+    λt::T
+    mmis::M
+end
+
+function SolverInterface.eval_f(d::DeformTseriesOpt, x)
+    _copy!(d.ϕs, x)
+    penalty!(nothing, d.ϕs, d.ϕs_old, d.dp, d.λt, d.mmis)
+end
+
+function SolverInterface.eval_grad_f(d::DeformTseriesOpt, grad_f, x)
+    _copy!(d.ϕs, x)
+    penalty!(grad_f, d.ϕs, d.ϕs_old, d.dp, d.λt, d.mmis)
+end
+
+function _copy!{D<:GridDeformation,T<:Number}(ϕs::Vector{D}, x::Array{T})
+    N = ndims(first(ϕs))
+    L = N*length(first(ϕs).u)
+    length(x) == L*length(ϕs) || throw(DimensionMismatch("ϕs is incommensurate with a vector of length $(length(x))"))
+    for (i, ϕ) in enumerate(ϕs)
+        uvec = reinterpret(eltype(ϕ), ϕ.u, (L,))
+        copy!(uvec, 1, x, (i-1)*L+1, L)
+    end
+    ϕs
 end
 
 """

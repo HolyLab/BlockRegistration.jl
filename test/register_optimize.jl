@@ -264,3 +264,27 @@ dp = AffinePenalty(knots, λ)
 for I in eachindex(shifts)
     @test_approx_eq_eps shifts[I] ϕ.u[I] 0.01
 end
+
+### Optimization with a temporal penalty
+Qs = cat(3, eye(2,2), zeros(2,2), eye(2,2))
+cs = cat(2, [5,-3], [0,0], [3,-1])
+gridsize = (2,2)
+denom = ones(15,15)
+mms = tighten([quadratic(cs[:,t], Qs[:,:,t], denom) for i = 1:gridsize[1], j = 1:gridsize[2], t = 1:3])
+mmis = RegisterPenalty.interpolate_mm!(mms)
+knots = (linspace(1,100,gridsize[1]), linspace(1,99,gridsize[2]))
+ap = RegisterPenalty.AffinePenalty(knots, 1.0)
+u = randn(2, gridsize..., 3)
+ϕs = tighten([GridDeformation(u[:,:,:,t], knots) for t = 1:3])
+g = similar(u)
+ϕs, fval, fval0 = RegisterOptimize.optimize!(ϕs, identity, ap, 1.0, mmis)
+c = 1/prod(gridsize)  # not sure about this
+A = [2c+1 -1 0; -1 2 -1; 0 -1 2c+1]
+target = (A\(2c*cs'))'
+for (u, val) in ((ϕs[1].u, target[:,1]),
+                 (ϕs[2].u, target[:,2]),
+                 (ϕs[3].u, target[:,3]))
+    for uv in u
+        @test_approx_eq_eps uv val 1e-2  # look into why this is so low
+    end
+end

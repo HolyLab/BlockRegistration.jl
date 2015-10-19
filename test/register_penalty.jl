@@ -3,6 +3,9 @@ import BlockRegistration, RegisterPenalty
 using RegisterCore, RegisterDeformation
 RP = RegisterPenalty
 
+# could probably update tests below to make better use of this
+include("register_test_utilities.jl")
+
 gridsize = (9,7)
 maxshift = (3,3)
 imgsize = (1000,1002)
@@ -194,7 +197,7 @@ for nd = 1:3
             ud = convert(Array{Dual{Float64}}, u_raw)
             ud[idim,i] = dual(u_raw[idim,i], 1)
             vald = RP.penalty!(nothing, GridDeformation(ud, imgsize), identity, dp, mmis)
-            @test_approx_eq_eps g[i][idim] epsilon(vald) 1e-12
+            @test_approx_eq_eps g[i][idim] epsilon(vald) 1e-10
         end
     end
 
@@ -227,4 +230,34 @@ cnvt = x->RegisterPenalty.vec2ϕs(x, gsize, n, knots)
 g = similar(x)
 val = RegisterPenalty.penalty!(g, 1.0, ϕs)
 gfunc = ForwardDiff.gradient(x->RegisterPenalty.penalty(1.0, cnvt(x)))
-@test_approx_eq g gfunc(x)
+@test_approx_eq vec(g) gfunc(x)
+
+### Total penalty, with a temporal penalty
+Qs = cat(3, eye(2,2), zeros(2,2), eye(2,2))
+cs = cat(2, [5,-3], [0,0], [3,-1])
+gridsize = (2,2)
+denom = ones(15,15)
+mms = tighten([quadratic(cs[:,t], Qs[:,:,t], denom) for i = 1:gridsize[1], j = 1:gridsize[2], t = 1:3])
+mmis = RegisterPenalty.interpolate_mm!(mms)
+knots = (linspace(1,100,gridsize[1]), linspace(1,99,gridsize[2]))
+ap = RegisterPenalty.AffinePenalty(knots, 1.0)
+u = randn(2, gridsize..., 3)
+buildϕ(u, knots) = [GridDeformation(u[:,:,:,t], knots) for t = 1:size(u)[end]]
+ϕs = buildϕ(u, knots)
+g = similar(u)
+λt = 1.0
+RegisterPenalty.penalty!(g, ϕs, identity, ap, λt, mmis)
+function pfun(x, ϕs, ap, λt, mmis)
+    RegisterPenalty.penalty!(nothing, similarϕ(ϕs, x), identity, ap, λt, mmis)
+end
+# This is needed for handling GradientNumbers
+function similarϕ{Tϕ,N,A,L,Tx}(ϕs::Vector{GridDeformation{Tϕ,N,A,L}}, x::Array{Tx})
+    len = N*length(first(ϕs).u)
+    length(x) == len*length(ϕs) || throw(DimensionMismatch("ϕs is incommensurate with a vector of length $(length(x))"))
+    xf = RegisterDeformation.convert_to_fixed(Vec{N,Tx}, x, (size(first(ϕs).u)..., length(ϕs)))
+    colons = ntuple(i->Colon(), N)::NTuple{N,Colon}
+    [GridDeformation(xf[colons..., i], ϕs[i].knots) for i = 1:length(ϕs)]
+end
+tgrad = ForwardDiff.gradient(x->pfun(x, ϕs, ap, λt, mmis))
+gcmp = tgrad(vec(u))
+@test_approx_eq vec(g) gcmp
