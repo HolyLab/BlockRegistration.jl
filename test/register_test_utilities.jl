@@ -10,6 +10,17 @@ function quadratic(m, n, shift, Q)
     A
 end
 
+quadratic(shift, Q, denom::Matrix) = MismatchArray(quadratic(size(denom)..., shift, Q), denom)
+
 function block_center(sz...)
     ntuple(i->sz[i]>>1+1, length(sz))
+end
+
+function tighten(A::AbstractArray)
+    T = typeof(first(A))
+    for a in A
+        T = promote_type(T, typeof(a))
+    end
+    At = similar(A, T)
+    copy!(At, A)
 end

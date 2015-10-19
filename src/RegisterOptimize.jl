@@ -331,9 +331,6 @@ function _affine_part!{T,N}(g, ap::AffinePenalty{T,N}, u)
     s
 end
 
-immutable ColonFun end
-Base.call(::ColonFun, ::Int) = Colon()
-
 function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs, ϕ_old, maxshift)
     error("This is broken, don't use it")
     b = prep_b(T, cs, Qs)

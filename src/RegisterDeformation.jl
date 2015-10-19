@@ -61,6 +61,8 @@ Base.eltype{T,N}(::Type{AbstractDeformation{T,N}}) = T
 Base.ndims{T,N}(::Type{AbstractDeformation{T,N}}) = N
 Base.eltype{D<:AbstractDeformation}(::Type{D}) = eltype(super(D))
 Base.ndims{D<:AbstractDeformation}(::Type{D}) = ndims(super(D))
+Base.eltype(d::AbstractDeformation) = eltype(typeof(d))
+Base.ndims(d::AbstractDeformation) = ndims(typeof(d))
 
 """
 `ϕ = GridDeformation(u::Array{FixedVector}, dims)` creates a

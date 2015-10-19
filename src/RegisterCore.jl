@@ -16,6 +16,7 @@ export
     # types
     MismatchArray,
     NumDenom,
+    ColonFun,
     # functions
     highpass,
     indmin_mismatch,
@@ -420,5 +421,9 @@ function highpass{T}(::Type{T}, data::AbstractArray, sigma)
 end
 highpass{T<:AbstractFloat}(data::AbstractArray{T}, sigma) = highpass(T, data, sigma)
 highpass(data::AbstractArray, sigma) = highpass(Float32, data, sigma)
+
+# For faster and type-stable slicing
+immutable ColonFun end
+Base.call(::ColonFun, ::Int) = Colon()
 
 end

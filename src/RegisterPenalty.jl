@@ -29,12 +29,15 @@ The main exported types/functions are:
 RegisterPenalty
 
 
-abstract DeformationPenalty{T}
-Base.eltype{T}(::Type{DeformationPenalty{T}}) = T
+abstract DeformationPenalty{T,N}
+Base.eltype{T,N}(::Type{DeformationPenalty{T,N}}) = T
 Base.eltype{DP<:DeformationPenalty}(::Type{DP}) = eltype(super(DP))
+Base.eltype(dp::DeformationPenalty) = eltype(typeof(dp))
+Base.ndims{T,N}(::Type{DeformationPenalty{T,N}}) = N
+Base.ndims{DP<:DeformationPenalty}(::Type{DP}) = ndims(super(DP))
+Base.ndims(dp::DeformationPenalty) = ndims(typeof(dp))
 
 """
-
 `p = penalty!(g, ϕ, ϕ_old, dp::DeformationPenalty, mmis, [keep])`
 computes the total penalty (data penalty + regularization penalty)
 associated with a deformation `ϕ`, mismatch data `mmis`, and
@@ -221,7 +224,7 @@ When the deformation is defined on a regular grid, `knots` can be an
 NTuple of knot-vectors; otherwise, it should be an
 `ndims`-by-`npoints` matrix that stores the knot locations in columns.
 """
-type AffinePenalty{T,N} <: DeformationPenalty{T}
+type AffinePenalty{T,N} <: DeformationPenalty{T,N}
     F::Matrix{T}   # geometry data for the affine-residual penalty
     λ::T           # regularization coefficient
 
