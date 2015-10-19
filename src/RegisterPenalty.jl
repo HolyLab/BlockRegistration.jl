@@ -68,8 +68,9 @@ identity`, then no composition is needed, `g_c` is the identity, and
 Note that `ϕ_old`, if not equal to `identity`, must be
 interpolating. In contrast, `ϕ` must not be interpolating.
 
-`g` should be the same type and size as `ϕ.u`, i.e., an array of
-fixed-sized vectors `Vec{N,T}`.
+`g` can be a single `Vector{T}` (for some number-type `T`), or can be
+the same type and size as `ϕ.u`, i.e., an array of fixed-sized vectors
+`Vec{N,T}`.
 
 Further details are described in the help for the individual
 `penalty!` calls.
@@ -91,6 +92,13 @@ function penalty!(g, ϕ, ϕ_old, dp::DeformationPenalty, mmis::AbstractArray, ke
     val += penalty!(g, ϕ, mmis, keep)
     convert(T, val)
 end
+
+# Allow it to be called without FixedSizeArrays
+function penalty!{T<:Number}(g::Array{T}, ϕ, ϕ_old, dp::DeformationPenalty, mmis::AbstractArray, keep = trues(size(mmis)))
+    gf = RegisterDeformation.convert_to_fixed(g, (ndims(dp), size(ϕ.u)...))
+    penalty!(gf, ϕ, ϕ_old, dp, mmis, keep)
+end
+
 
 ################
 # Data penalty #
@@ -122,6 +130,11 @@ interpolating, so that it can be evaluated for fractional shifts.
 """
 function penalty!{T,Dim,A<:AbstractInterpolation}(g, ϕ::AbstractDeformation, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
     penalty!(g, ϕ.u, mmis, keep)
+end
+
+function penalty!{Tg<:Number, T,Dim,A<:AbstractInterpolation}(g::Array{Tg}, ϕ::AbstractDeformation, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
+    gf = RegisterDeformation.convert_to_fixed(Vec{Dim,Tg}, g, size(ϕ.u))
+    penalty!(gf, ϕ, mmis, keep)
 end
 
 function penalty!{T,Dim,A<:AbstractInterpolation}(g, u::AbstractArray, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
