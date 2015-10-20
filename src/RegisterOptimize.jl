@@ -3,9 +3,9 @@ __precompile__()
 module RegisterOptimize
 
 using MathProgBase, Ipopt, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers
-using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit
+using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit, CenterIndexedArrays
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
-using Base.Test
+using Base: Test, tail
 
 import Base: *
 import MathProgBase: SolverInterface
@@ -28,6 +28,7 @@ The main functions are:
 - `optimize_rigid`: iteratively improve a rigid transformation, given raw images
 - `initial_deformation`: provide an initial guess based on mismatch quadratic fits
 - `optimize!`: iteratively improve a deformation, given mismatch data
+- `fixed_λ` and `auto_λ`: "complete" optimizers that generate initial guesses and then find the minimum
 """
 RegisterOptimize
 
@@ -421,7 +422,9 @@ output, `ϕ` is set in-place to the new optimized deformation,
 It's recommended that you verify that `fval < fval0`; if it's not
 true, consider adding `mu_strategy="monotone", mu_init=??` to the
 options (where the value of ?? might require some experimentation; a
-starting point might be 1e-4).
+starting point might be 1e-4).  See also `fixed_λ` and `auto_λ`.
+
+Any additional keyword arguments get passed as options to Ipopt.
 """
 function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-6, print_level=0, kwargs...)
     objective = DeformOpt(ϕ, ϕ_old, dp, mmis)
@@ -547,7 +550,7 @@ object for that grid, and `mmis` is the array-of-mismatch arrays
 
 See also: `auto_λ`.
 """
-function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis)
+function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis; mu_init=0.1, kwargs...)
     maxshift = map(x->(x-1)>>1, size(first(mmis)))
     u0, isconverged = initial_deformation(ap, cs, Qs)
     if !isconverged
@@ -555,15 +558,67 @@ function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis)
     end
     uclamp!(u0, maxshift)
     ϕ = GridDeformation(u0, knots)
-    mu_init = 0.1
     local mismatch
     while mu_init > 1e-16
-        ϕ, mismatch, mismatch0 = optimize!(ϕ, identity, ap, mmis, mu_strategy="monotone", mu_init=mu_init)
+        ϕ, mismatch, mismatch0 = optimize!(ϕ, identity, ap, mmis, mu_strategy="monotone", mu_init=mu_init, kwargs...)
         mismatch <= mismatch0 && break
         mu_init /= 10
         @show mu_init
     end
     ϕ, mismatch
+end
+
+"""
+`ϕs, penalty = fixed_λ(cs, Qs, knots, affinepenalty, λt, mmis)`
+computes an optimal vector-of-deformations `ϕs` for an image sequence,
+using an temporal penalty coefficient `λt`.
+"""
+function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mmis; mu_init=0.1, kwargs...)
+    maxshift = map(x->(x-1)>>1, size(first(mmis)))
+    print("Calculating initial guess (this may take a while)...")
+    u0, isconverged = initial_deformation(ap, λt, cs, Qs)
+    println("done")
+    if !isconverged
+        Base.warn_once("initial_deformation failed to converge with λ = ", ap.λ, ", λt = ", λt)
+    end
+    uclamp!(u0, maxshift)
+    colons = ntuple(ColonFun(), Val{N})
+    ϕs = [GridDeformation(convert(Array{Vec{N,Float64}}, u0[colons..., i]), knots) for i = 1:size(u0)[end]]
+    local mismatch
+    while mu_init > 1e-16
+        ϕs, mismatch, mismatch0 = optimize!(ϕs, identity, ap, λt, mmis; mu_strategy="monotone", mu_init=mu_init, kwargs...)
+        mismatch <= mismatch0 && break
+        mu_init /= 10
+        @show mu_init
+    end
+    ϕs, mismatch
+end
+
+# This version re-packs variables as read from the .jld file
+function fixed_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mmis::Array{Tf}; mu_init=0.1, kwargs...)
+    csr = reinterpret(Vec{N,Tf}, cs, tail(size(cs)))
+    Qsr = reinterpret(Mat{N,N,Tf}, Qs, tail(tail(size(Qs))))
+    ND = NumDenom{Tf}
+    mmisr = reinterpret(ND, mmis, tail(size(mmis)))
+    # This next part is quite tricky: we've already prefiltered before
+    # writing the JLD file, so we'd better not prefilter
+    # again. Moreover, there's no guarantee that mmis will fit in
+    # memory, it's presumably mmapped---so we can't do any
+    # manipulations that will result in creating a resident dataset.
+    # The strategy is to leverage pointer_to_array to snip out Arrays
+    # (instead of using slice), and then wrap appropriately.
+    @assert ndims(mmisr) == 2N+1
+    BS = Interpolations.BSplineInterpolation{ND,N,ND,BSpline{Quadratic{InPlace}},OnCell,0}
+    mmisc = Array(CenterIndexedArray{ND,N,BS}, size(mmisr)[N+1:end])
+    sz = size(mmisr)[1:N]::NTuple{N,Int}
+    step = prod(sz)
+    i = 1
+    for I in CartesianRange(size(mmisc))
+        A = pointer_to_array(pointer(mmisr, i), sz)
+        mmisc[I] = CenterIndexedArray(BS(A))
+        i += step
+    end
+    fixed_λ(csr, Qsr, knots, ap, λt, mmisc; mu_init=mu_init, kwargs...)
 end
 
 ###
