@@ -5,7 +5,7 @@ __precompile__()
 module RegisterPenalty
 
 using Interpolations, FixedSizeArrays, Base.Cartesian
-using RegisterDeformation, RegisterCore, CenterIndexedArrays
+using RegisterDeformation, RegisterCore, CenterIndexedArrays, CachedInterpolations
 using RegisterDeformation: convert_from_fixed, convert_to_fixed
 
 export AffinePenalty, DeformationPenalty, penalty!, interpolate_mm!
@@ -141,6 +141,8 @@ end
 # Data penalty #
 ################
 
+typealias CenteredInterpolant{T,N,A<:AbstractInterpolation} Union{MismatchArray{T,N,A}, CachedInterpolation{T,N}}
+
 """
 `p = penalty!(g, ϕ, mmis, [keep=trues(size(mmis))])` computes the
 data penalty, i.e., the total mismatch between `fixed`
@@ -165,16 +167,16 @@ where each index `_i` refers to a single aperture, and each `p_i`
 involves just `mmis[i]` and `ϕ.u[:,i]`.  `mmis[i]` must be
 interpolating, so that it can be evaluated for fractional shifts.
 """
-function penalty!{T,Dim,A<:AbstractInterpolation}(g, ϕ::AbstractDeformation, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
+function penalty!{M<:CenteredInterpolant}(g, ϕ::AbstractDeformation, mmis::AbstractArray{M}, keep=trues(size(mmis)))
     penalty!(g, ϕ.u, mmis, keep)
 end
 
-function penalty!{Tg<:Number, T,Dim,A<:AbstractInterpolation}(g::Array{Tg}, ϕ::AbstractDeformation, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
-    gf = RegisterDeformation.convert_to_fixed(Vec{Dim,Tg}, g, size(ϕ.u))
+function penalty!{Tg<:Number,M<:CenteredInterpolant}(g::Array{Tg}, ϕ::AbstractDeformation, mmis::AbstractArray{M}, keep=trues(size(mmis)))
+    gf = RegisterDeformation.convert_to_fixed(g, (ndims(ϕ), size(ϕ.u)...))
     penalty!(gf, ϕ, mmis, keep)
 end
 
-function penalty!{T,Dim,A<:AbstractInterpolation}(g, u::AbstractArray, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
+function penalty!{Tu,Dim,M<:CenteredInterpolant}(g, u::AbstractArray{Vec{Dim,Tu}}, mmis::AbstractArray{M}, keep=trues(size(mmis)))
     # This "outer" function just handles the chain rule for computing the
     # total penalty and gradient. The "real" work is done by penalty_nd!.
     nblocks = length(mmis)
@@ -186,7 +188,6 @@ function penalty!{T,Dim,A<:AbstractInterpolation}(g, u::AbstractArray, mmis::Abs
         end
     end
     if calc_gradient
-        Tu = eltype(eltype(u))
         gnd = similar(u, Vec{Dim,NumDenom{Tu}})
         nd = penalty_nd!(gnd, u, mmis, keep)
         N, D = nd.num, nd.denom

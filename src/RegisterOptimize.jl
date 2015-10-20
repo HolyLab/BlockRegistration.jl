@@ -3,7 +3,7 @@ __precompile__()
 module RegisterOptimize
 
 using MathProgBase, Ipopt, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers
-using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit, CenterIndexedArrays
+using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit, CachedInterpolations
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base: Test, tail
 
@@ -585,6 +585,7 @@ function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mm
     colons = ntuple(ColonFun(), Val{N})
     ϕs = [GridDeformation(convert(Array{Vec{N,Float64}}, u0[colons..., i]), knots) for i = 1:size(u0)[end]]
     local mismatch
+    println("Starting optimization.")
     while mu_init > 1e-16
         ϕs, mismatch, mismatch0 = optimize!(ϕs, identity, ap, λt, mmis; mu_strategy="monotone", mu_init=mu_init, kwargs...)
         mismatch <= mismatch0 && break
@@ -598,26 +599,13 @@ end
 function fixed_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mmis::Array{Tf}; mu_init=0.1, kwargs...)
     csr = reinterpret(Vec{N,Tf}, cs, tail(size(cs)))
     Qsr = reinterpret(Mat{N,N,Tf}, Qs, tail(tail(size(Qs))))
+    if length(mmis) > 10^7
+        L = length(mmis)*sizeof(Tf)/1024^3
+        @printf "The mismatch data are %0.2f GB in size.\n  During optimization, the first function evaluation may be I/O bound and\n  can be very slow, but it should get faster for later evaluations.\n" L
+    end
     ND = NumDenom{Tf}
     mmisr = reinterpret(ND, mmis, tail(size(mmis)))
-    # This next part is quite tricky: we've already prefiltered before
-    # writing the JLD file, so we'd better not prefilter
-    # again. Moreover, there's no guarantee that mmis will fit in
-    # memory, it's presumably mmapped---so we can't do any
-    # manipulations that will result in creating a resident dataset.
-    # The strategy is to leverage pointer_to_array to snip out Arrays
-    # (instead of using slice), and then wrap appropriately.
-    @assert ndims(mmisr) == 2N+1
-    BS = Interpolations.BSplineInterpolation{ND,N,ND,BSpline{Quadratic{InPlace}},OnCell,0}
-    mmisc = Array(CenterIndexedArray{ND,N,BS}, size(mmisr)[N+1:end])
-    sz = size(mmisr)[1:N]::NTuple{N,Int}
-    step = prod(sz)
-    i = 1
-    for I in CartesianRange(size(mmisc))
-        A = pointer_to_array(pointer(mmisr, i), sz)
-        mmisc[I] = CenterIndexedArray(BS(A))
-        i += step
-    end
+    mmisc = cachedinterpolators(mmisr, N, ntuple(d->(size(mmisr,d)+1)>>1, N))
     fixed_λ(csr, Qsr, knots, ap, λt, mmisc; mu_init=mu_init, kwargs...)
 end
 
@@ -945,5 +933,7 @@ function sigpenalty(x, data)
     bottom, top, center, width = x[1], x[2], x[3], x[4]
     sumabs2((data-bottom)/(top-bottom) - 1./(1+exp(-((1:length(data))-center)/width)))
 end
+
+RegisterCore.maxshift{T,N}(A::CachedInterpolation{T,N}) = ntuple(d->size(A.parent,d)>>1, N)
 
 end # module
