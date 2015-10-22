@@ -521,6 +521,7 @@ function optimize!(ϕs, ϕs_old, dp::AffinePenalty, λt, mmis; kwargs...)
     T = eltype(eltype(first(mmis)))
     objective = DeformTseriesOpt(ϕs, ϕs_old, dp, λt, mmis)
     df = DifferentiableFunction(x->SolverInterface.eval_f(objective, x),
+                                (x,g)->SolverInterface.eval_grad_f(objective, g, x),
                                 (x,g)->SolverInterface.eval_grad_f(objective, g, x))
     uvec = u_as_vec(ϕs)
     mxs = maxshift(first(mmis))
@@ -540,6 +541,8 @@ type DeformTseriesOpt{D,Dsold,DP,T,M} <: GradOnlyBoundsOnly
     mmis::M
 end
 
+# Using SolverInterface is a legacy of the old Ipopt interface, but
+# keeping it doesn't hurt anything.
 function SolverInterface.eval_f(d::DeformTseriesOpt, x)
     _copy!(d.ϕs, x)
     penalty!(nothing, d.ϕs, d.ϕs_old, d.dp, d.λt, d.mmis)
