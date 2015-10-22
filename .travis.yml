@@ -12,6 +12,7 @@ addons:
       - build-essential
       - gfortran
       - pkg-config
+      - hdf5-tools
 script:
   - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
   - julia -e 'Pkg.clone(pwd()); Pkg.build("BlockRegistration")'
