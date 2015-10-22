@@ -594,10 +594,12 @@ end
 computes an optimal vector-of-deformations `ϕs` for an image sequence,
 using an temporal penalty coefficient `λt`.
 """
-function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mmis; mu_init=0.1, kwargs...)
+function fixed_λ{T,N,_}(cs::AbstractArray{Vec{N,T}}, Qs::AbstractArray{Mat{N,N,T}}, knots::NTuple{N}, ap::AffinePenalty{_,N}, λt, mmis; mu_init=0.1, kwargs...)
+    λtT = T(λt)
+    apT = convert(AffinePenalty{T,N}, ap)
     maxshift = map(x->(x-1)>>1, size(first(mmis)))
     print("Calculating initial guess (this may take a while)...")
-    u0, isconverged = initial_deformation(ap, λt, cs, Qs)
+    u0, isconverged = initial_deformation(apT, λtT, cs, Qs)
     println("done")
     if !isconverged
         Base.warn_once("initial_deformation failed to converge with λ = ", ap.λ, ", λt = ", λt)
@@ -607,7 +609,7 @@ function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mm
     ϕs = [GridDeformation(u0[colons..., i], knots) for i = 1:size(u0)[end]]
     local mismatch
     println("Starting optimization.")
-    optimize!(ϕs, identity, ap, λt, mmis; kwargs...)
+    optimize!(ϕs, identity, apT, λtT, mmis; kwargs...)
 end
 
 # This version re-packs variables as read from the .jld file
@@ -616,7 +618,7 @@ function fixed_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}
     Qsr = reinterpret(Mat{N,N,Tf}, Qs, tail(tail(size(Qs))))
     if length(mmis) > 10^7
         L = length(mmis)*sizeof(Tf)/1024^3
-        @printf "The mismatch data are %0.2f GB in size.\n  During optimization, the first function evaluation may be I/O bound and\n  can be very slow, but it should get faster for later evaluations.\n" L
+        @printf "The mismatch data are %0.2f GB in size.\n  During optimization, the initial function evaluations may be limited by I/O and\n  could be very slow. Later evaluations should be faster.\n" L
     end
     ND = NumDenom{Tf}
     mmisr = reinterpret(ND, mmis, tail(size(mmis)))
