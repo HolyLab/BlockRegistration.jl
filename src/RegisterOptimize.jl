@@ -727,6 +727,37 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     ϕ_all[idx], penalty_all[idx], λ_all[idx], datapenalty_all, quality
 end
 
+# Because of the long run times, here we only use the quadratic approximation
+function auto_λt(Es, cs, Qs, ap, λtrange)
+    ngrid = prod(size(Es)[1:end-1])
+    Esum = sum(Es)
+    λt = first(λtrange)
+    n = ceil(Int, log2(last(λtrange)) - log2(λt))
+    datapenalty = Array(typeof(Esum), n)
+    λts = Array(typeof(λt), n)
+    @showprogress 1 "Calculating quadratic penalty as a function of λt: " for λindex = 1:n
+        λts[λindex] = λt
+        u0, isconverged = initial_deformation(ap, λt, cs, Qs)
+        if !isconverged
+            println("initial_deformation failed to converge with λ = ", ap.λ, ", λt = ", λt)
+        end
+        val = Esum
+        for i = 1:length(u0)
+            du = u0[i] - cs[i]
+            val += dot(du, Qs[i] * du)
+        end
+        datapenalty[λindex] = val/ngrid
+        λt *= 2
+    end
+    λts, datapenalty
+end
+
+function auto_λt{Tf<:Number,T,N}(Es, cs::Array{Tf}, Qs::Array{Tf}, ap::AffinePenalty{T,N}, λt)
+    csr = reinterpret(Vec{N,Tf}, cs, tail(size(cs)))
+    Qsr = reinterpret(Mat{N,N,Tf}, Qs, tail(tail(size(Qs))))
+    auto_λt(Es, csr, Qsr, ap, λt)
+end
+
 ###
 ### Whole-experiment optimization with a temporal roughness penalty
 ###
