@@ -511,6 +511,12 @@ end
 #     _optimize!(objective, ϕs, dp, mmis, tol, print_level; kwargs...)
 # end
 
+"""
+`ϕs, penalty = optimize!(ϕs, ϕs_old, dp, λt, mmis; kwargs...)`
+optimizes a sequence `ϕs` of deformations for an image sequence with
+mismatch data `mmis`, using a spatial deformation penalty `dp` and
+temporal penalty coefficient `λt`.
+"""
 function optimize!(ϕs, ϕs_old, dp::AffinePenalty, λt, mmis; kwargs...)
     T = eltype(eltype(first(mmis)))
     objective = DeformTseriesOpt(ϕs, ϕs_old, dp, λt, mmis)
@@ -728,6 +734,20 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
 end
 
 # Because of the long run times, here we only use the quadratic approximation
+"""
+`λts, datapenalty = auto_λt(Es, cs, Qs, ap, (λtmin, λtmax))` estimates
+the whole-experiment mismatch penalty as a function of `λt`, choosing
+values starting at `λtmin` and increasing two-fold until `λtmax`.
+`Es`, `cs`, and `Qs` come from the quadratic fix of the mismatch, and
+`ap` is the (spatial) affine-residual penalty.
+
+By plotting `datapenalty` vs `λts` (with a log-scale on the x-axis),
+you can find the "kink" at which the value of `λt` begins to constrain
+the optimization.  Good choices for `λt` tend to be near this kink.
+Since only an approximation of the mismatch is used, the value of the
+estimated data penalty will not be terribly accurate, but the hope is
+that its dependence on `λt` will be approximately correct.
+"""
 function auto_λt(Es, cs, Qs, ap, λtrange)
     ngrid = prod(size(Es)[1:end-1])
     Esum = sum(Es)

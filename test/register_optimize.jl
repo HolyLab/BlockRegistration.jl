@@ -277,7 +277,7 @@ ap = RegisterPenalty.AffinePenalty(knots, 1.0)
 u = randn(2, gridsize..., 3)
 ϕs = tighten([GridDeformation(u[:,:,:,t], knots) for t = 1:3])
 g = similar(u)
-ϕs, fval, fval0 = RegisterOptimize.optimize!(ϕs, identity, ap, 1.0, mmis)
+ϕs, fval = RegisterOptimize.optimize!(ϕs, identity, ap, 1.0, mmis)
 c = 1/prod(gridsize)  # not sure about this
 A = [2c+1 -1 0; -1 2 -1; 0 -1 2c+1]
 target = (A\(2c*cs'))'
