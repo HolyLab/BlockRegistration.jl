@@ -111,6 +111,7 @@ function penalty!{D<:AbstractDeformation}(gs, ϕs::AbstractVector{D}, ϕs_old, d
     size(mmis)[end] == ntimes || throw(DimensionMismatch("Number of deformations $ntimes does not agree with mismatch data of size $(size(mmis))"))
     s = _penalty!(gs, ϕs, ϕs_old, dp, mmis, keep, 1)
     for i = 2:ntimes
+        isfinite(s) || break
         s += _penalty!(gs, ϕs, ϕs_old, dp, mmis, keep, i)
     end
     s + penalty!(gs, λt, ϕs)

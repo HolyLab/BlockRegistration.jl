@@ -2,7 +2,7 @@ __precompile__()
 
 module RegisterOptimize
 
-using MathProgBase, Ipopt, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers
+using MathProgBase, Ipopt, Optim, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers, ProgressMeter
 using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit, CachedInterpolations
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base: Test, tail
@@ -360,7 +360,7 @@ function find_opt{AP,M,N,Φ<:GridDeformation}(P::AffineQHessian{AP,M,N,Φ}, b, m
     m = SolverInterface.model(solver)
     T = eltype(b)
     n = length(b)
-    ub1 = T[maxshift...] - T(0.5001)
+    ub1 = T[maxshift...] - T(RegisterFit.register_half)
     ub = repeat(ub1, outer=[div(n, length(maxshift))])
     SolverInterface.loadnonlinearproblem!(m, n, 0, -ub, ub, T[], T[], :Min, objective)
     SolverInterface.setwarmstart!(m, x0)
@@ -441,7 +441,7 @@ function _optimize!(objective, ϕ, dp, mmis, tol, print_level; kwargs...)
                          sb="yes",
                          tol=tol, kwargs...)
     m = SolverInterface.model(solver)
-    ub1 = T[mxs...] - T(0.5001)
+    ub1 = T[mxs...] - T(RegisterFit.register_half)
     ub = repeat(ub1, outer=[div(length(uvec), length(ub1))])
     SolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
     SolverInterface.setwarmstart!(m, uvec)
@@ -506,10 +506,25 @@ end
 
 
 # With temporal penalty
-function optimize!(ϕs, ϕs_old, dp::DeformationPenalty, λt, mmis; tol=1e-6, print_level=0, kwargs...)
+# function optimize!(ϕs, ϕs_old, dp::DeformationPenalty, λt, mmis; tol=1e-6, print_level=0, kwargs...)
+#     objective = DeformTseriesOpt(ϕs, ϕs_old, dp, λt, mmis)
+#     _optimize!(objective, ϕs, dp, mmis, tol, print_level; kwargs...)
+# end
+
+function optimize!(ϕs, ϕs_old, dp::AffinePenalty, λt, mmis; kwargs...)
+    T = eltype(eltype(first(mmis)))
     objective = DeformTseriesOpt(ϕs, ϕs_old, dp, λt, mmis)
-    _optimize!(objective, ϕs, dp, mmis, tol, print_level; kwargs...)
+    df = DifferentiableFunction(x->SolverInterface.eval_f(objective, x),
+                                (x,g)->SolverInterface.eval_grad_f(objective, g, x))
+    uvec = u_as_vec(ϕs)
+    mxs = maxshift(first(mmis))
+    ub1 = T[mxs...] - T(RegisterFit.register_half)
+    ub = repeat(ub1, outer=[div(length(uvec), length(ub1))])
+    constraints = ConstraintsBox(-ub, ub)
+    result = interior(df, uvec, constraints; method=:l_bfgs, xtol=1e-4, kwargs...)
+    _copy!(ϕs, result.minimum), result.f_minimum
 end
+
 
 type DeformTseriesOpt{D,Dsold,DP,T,M} <: GradOnlyBoundsOnly
     ϕs::Vector{D}
@@ -583,16 +598,10 @@ function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mm
     end
     uclamp!(u0, maxshift)
     colons = ntuple(ColonFun(), Val{N})
-    ϕs = [GridDeformation(convert(Array{Vec{N,Float64}}, u0[colons..., i]), knots) for i = 1:size(u0)[end]]
+    ϕs = [GridDeformation(u0[colons..., i], knots) for i = 1:size(u0)[end]]
     local mismatch
     println("Starting optimization.")
-    while mu_init > 1e-16
-        ϕs, mismatch, mismatch0 = optimize!(ϕs, identity, ap, λt, mmis; mu_strategy="monotone", mu_init=mu_init, kwargs...)
-        mismatch <= mismatch0 && break
-        mu_init /= 10
-        @show mu_init
-    end
-    ϕs, mismatch
+    optimize!(ϕs, identity, ap, λt, mmis; kwargs...)
 end
 
 # This version re-packs variables as read from the .jld file
@@ -934,6 +943,9 @@ function sigpenalty(x, data)
     sumabs2((data-bottom)/(top-bottom) - 1./(1+exp(-((1:length(data))-center)/width)))
 end
 
-RegisterCore.maxshift{T,N}(A::CachedInterpolation{T,N}) = ntuple(d->size(A.parent,d)>>1, N)
+@generated function RegisterCore.maxshift{T,N}(A::CachedInterpolation{T,N})
+    args = [:(size(A.parent, $d)>>1) for d = 1:N]
+    Expr(:tuple, args...)
+end
 
 end # module
