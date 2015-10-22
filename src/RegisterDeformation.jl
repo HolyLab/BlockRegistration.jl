@@ -145,47 +145,6 @@ end
 GridDeformation{V<:AbstractVector}(u, knots::AbstractVector{V}) = GridDeformation(u, (knots...,))
 GridDeformation{R<:Real}(u, knots::AbstractVector{R}) = GridDeformation(u, (knots,))
 
-function convert_to_fixed{T}(u::Array{T}, sz=size(u))
-    N = sz[1]
-    convert_to_fixed(Vec{N, T}, u, tail(sz))
-end
-
-# Unlike the one above, this is type-stable
-function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u, sz)
-    if isbits(T)
-        uf = reinterpret(Vec{N,T}, u, sz)
-    else
-        uf = Array(Vec{N,T}, sz)
-        copy_ctf!(uf, u)
-    end
-    uf
-end
-
-@generated function copy_ctf!{N,T}(dest::Array{Vec{N,T}}, src::Array)
-    exvec = [:(src[offset+$d]) for d=1:N]
-    quote
-        for i = 1:length(dest)
-            offset = (i-1)*N
-            dest[i] = Vec($(exvec...))
-        end
-        dest
-    end
-end
-
-function convert_from_fixed{N,T}(uf::AbstractArray{Vec{N,T}}, sz=size(uf))
-    if isbits(T) && isa(uf, Array)
-        u = reinterpret(T, uf, (N, sz...))
-    else
-        u = Array(T, (N, sz...))
-        for i = 1:length(uf)
-            for d = 1:N
-                u[d,i] = uf[i][d]
-            end
-        end
-    end
-    u
-end
-
 function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV})
     N = length(FV)
     ndims(u) == N || throw(DimensionMismatch("Dimension $(ndims(u)) incompatible with vectors of length $N"))
@@ -630,6 +589,27 @@ to_etp(etp::AbstractExtrapolation) = etp
 
 to_etp(img, A::AffineTransform) = TransformedArray(to_etp(img), A)
 
+# JLD extensions
+# Serializer for Array{FixedSizeArray{T,...}}
+immutable ArrayFSASerializer{T,DF,DT}
+    A::Array{T,DT}
+end
+
+function JLD.readas{T,DT}(serdata::ArrayFSASerializer{T,1,DT})
+    sz = size(serdata.A)
+    reinterpret(Vec{sz[1],T}, serdata.A, tail(sz))
+end
+function JLD.readas{T,DT}(serdata::ArrayFSASerializer{T,2,DT})
+    sz = size(serdata.A)
+    reinterpret(Mat{sz[1],sz[2],T}, serdata.A, tail(tail(sz)))
+end
+
+function JLD.writeas{FSA<:FixedArray}(A::Array{FSA})
+    T = eltype(FSA)
+    DF = ndims(FSA)
+    ArrayFSASerializer{T,DF,DF+ndims(A)}(reinterpret(T, A, (size(FSA)..., size(A)...)))
+end
+
 # Extensions to Interpolations and FixedSizedArrays
 @generated function vecindex{N}(A::AbstractArray, x::FixedVector{N})
     args = [:(x[$d]) for d = 1:N]
@@ -647,6 +627,47 @@ end
         $meta
         gradient!(g, itp, $(args...))
     end
+end
+
+function convert_to_fixed{T}(u::Array{T}, sz=size(u))
+    N = sz[1]
+    convert_to_fixed(Vec{N, T}, u, tail(sz))
+end
+
+# Unlike the one above, this is type-stable
+function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u, sz=tail(size(u)))
+    if isbits(T)
+        uf = reinterpret(Vec{N,T}, u, sz)
+    else
+        uf = Array(Vec{N,T}, sz)
+        copy_ctf!(uf, u)
+    end
+    uf
+end
+
+@generated function copy_ctf!{N,T}(dest::Array{Vec{N,T}}, src::Array)
+    exvec = [:(src[offset+$d]) for d=1:N]
+    quote
+        for i = 1:length(dest)
+            offset = (i-1)*N
+            dest[i] = Vec($(exvec...))
+        end
+        dest
+    end
+end
+
+function convert_from_fixed{N,T}(uf::AbstractArray{Vec{N,T}}, sz=size(uf))
+    if isbits(T) && isa(uf, Array)
+        u = reinterpret(T, uf, (N, sz...))
+    else
+        u = Array(T, (N, sz...))
+        for i = 1:length(uf)
+            for d = 1:N
+                u[d,i] = uf[i][d]
+            end
+        end
+    end
+    u
 end
 
 # Note this is a bit unsafe as it requires the user to specify C correctly

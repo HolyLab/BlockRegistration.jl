@@ -261,3 +261,15 @@ warped = open(fn, "r") do io
     read(io, Float32, size(img))
 end
 @test warped == img
+
+# Saving arrays-of-fixedsizearrays efficiently
+using JLD
+knots = (linspace(1,20,3), linspace(1,30,5))
+ϕ = RegisterDeformation.GridDeformation(rand(2,map(length,knots)...), knots)
+fn = joinpath(tempdir(), "def.jld")
+save(fn, "ϕ", ϕ)
+ϕ2 = load(fn, "ϕ")
+@test ϕ2.u == ϕ.u
+@test ϕ2.knots == ϕ.knots
+str = readall(`h5dump $fn`)
+@test !isempty(search(str, "SIMPLE { ( 5, 3, 2 ) / ( 5, 3, 2 ) }"))
