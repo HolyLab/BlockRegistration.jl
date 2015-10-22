@@ -454,39 +454,35 @@ function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ϕ)
 end
 
 """
-`warp!(T, io, img, uarray; [nworkers=1])` writes warped images to
+
+`warp!(T, io, img, ϕs; [nworkers=1])` writes warped images to
 disk. `io` is an `IO` object or HDF5/JLD dataset (the latter must be
 pre-allocated using `d_create` to be of the proper size). `img` is an
-image sequence, and `uarray` is an array of `u` values, one per image
-in `img` (where `size(uarray)[end] == nimages(img)`).  If `nworkers`
-is greater than one, it will spawn additional processes to perform the
-deformation.
+image sequence, and `ϕs` is a vector of deformations, one per image in
+`img`.  If `nworkers` is greater than one, it will spawn additional
+processes to perform the deformation.
+
+An alternative syntax is `warp!(T, io, img, uarray; [nworkers=1])`,
+where `uarray` is an array of `u` values with `size(uarray)[end] ==
+nimages(img)`.
 """
-function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, u; nworkers=1)
+function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, ϕs; nworkers=1)
     n = nimages(img)
     ssz = size(img)[coords_spatial(img)]
     if n == 1
-        if ndims(u) == sdims(img)+1
-            ϕ = GridDeformation(reshape(u, size(u)[1:end-1]), ssz)
-        else
-            ϕ = GridDeformation(u, ssz)
-        end
+        ϕ = extract1(ϕs, sdims(img), ssz)
         destarray = Array(T, ssz)
         warp!(destarray, img, ϕ)
         warp_write(dest, destarray)
         return nothing
     end
-    ndims(u) == sdims(img)+1 || error("u's dimensionality $(ndims(u)) is inconsistent with the number of spatial dimensions $(sdims(img)) of the image")
-    if size(u)[end] != n
-        error("Must have one `u` slice per image")
-    end
+    checkϕdims(ϕs, sdims(img), n)
     if nworkers > 1
-        return _warp!(T, dest, img, u, nworkers)
+        return _warp!(T, dest, img, ϕs, nworkers)
     end
     destarray = Array(T, ssz)
-    colons = [Colon() for d = 1:ndims(u)-1]
     @showprogress 1 "Stacks:" for i = 1:n
-        ϕ = GridDeformation(u[colons..., i], ssz)
+        ϕ = extracti(ϕs, i, ssz)
         warp!(destarray, slice(img, "t", i), ϕ)
         warp_write(dest, destarray, i)
     end
@@ -498,9 +494,8 @@ warp!{T,R<:Real}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, u::
 warp!(dest::Union{HDF5Dataset,JLD.JldDataset}, img, u; nworkers=1) =
     warp!(eltype(dest), dest, img, u; nworkers=nworkers)
 
-function _warp!{T}(::Type{T}, dest, img, u, nworkers)
+function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     n = nimages(img)
-    colons = [Colon() for d = 1:ndims(u)-1]
     ssz = size(img)[coords_spatial(img)]
     wpids = addprocs(nworkers)
     simg = Array(Any, 0)
@@ -524,7 +519,7 @@ function _warp!{T}(::Type{T}, dest, img, u, nworkers)
             warped = swarped[i]
             @async begin
                 while (idx = getnextidx()) <= n
-                    ϕ = GridDeformation(u[colons..., idx], ssz)
+                    ϕ = extracti(ϕs, idx, ssz)
                     copy!(src, slice(img, "t", idx))
                     remotecall_fetch(p, warp!, warped, src, ϕ)
                     put!(writing_mutex, true)
@@ -549,6 +544,32 @@ function warp_write(dest, destarray, i)
     colons = [Colon() for d = 1:ndims(destarray)]
     dest[colons..., i] = destarray
 end
+
+function extract1{V<:Vec}(u::AbstractArray{V}, N, ssz)
+    if ndims(u) == N+1
+        ϕ = GridDeformation(reshape(u, size(u)[1:end-1]), ssz)
+    else
+        ϕ = GridDeformation(u, ssz)
+    end
+    ϕ
+end
+extract1{D<:AbstractDeformation}(ϕs::Vector{D}, N, ssz) = ϕs[1]
+
+function extracti{V<:Vec}(u::AbstractArray{V}, i, ssz)
+    colons = [Colon() for d = 1:ndims(u)-1]
+    GridDeformation(u[colons..., i], ssz)
+end
+extracti{D<:AbstractDeformation}(ϕs::Vector{D}, i, _) = ϕs[i]
+
+function checkϕdims{V<:Vec}(u::AbstractArray{V}, N, n)
+    ndims(u) == N+1 || error("u's dimensionality $(ndims(u)) is inconsistent with the number of spatial dimensions $N of the image")
+    if size(u)[end] != n
+        error("Must have one `u` slice per image")
+    end
+    nothing
+end
+checkϕdims{D<:AbstractDeformation}(ϕs::Vector{D}, N, n) = length(ϕs) == n || error("Must have one `ϕ` per image")
+
 
 """
 `img = warpgrid(ϕ; [scale=1, showidentity=false])` returns an image

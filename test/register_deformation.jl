@@ -2,6 +2,8 @@ import BlockRegistration, RegisterDeformation
 using AffineTransforms, Interpolations, ColorTypes, ForwardDiff, FixedSizeArrays, Images
 using Base.Test
 
+include("register_test_utilities.jl")
+
 knots = (linspace(1,15,5), linspace(1,11,3))
 @test RegisterDeformation.arraysize(knots) == (15,11)
 
@@ -233,9 +235,18 @@ C = RegisterDeformation.warpgrid(ϕ, showidentity=true)
 o = ones(Float32, 5, 5)
 A = o .* reshape(1:7, (1,1,7))
 img = Image(A, timedim=3)
+fn = tempname()
+# With Vector{GridDeformation}
+ϕs = tighten([RegisterDeformation.GridDeformation(zeros(2,3,3), size(o)) for i = 1:nimages(img)])
+open(fn, "w") do io
+    RegisterDeformation.warp!(Float32, io, img, ϕs)
+end
+warped = open(fn, "r") do io
+    read(io, Float32, size(img))
+end
+@test warped == img
 # With Array{Vec}
 uarray = reinterpret(Vec{2,Float64}, zeros(2,3,3,7), (3,3,7))
-fn = tempname()
 open(fn, "w") do io
     RegisterDeformation.warp!(Float32, io, img, uarray)
 end
