@@ -5,7 +5,7 @@ __precompile__()
 module RegisterPenalty
 
 using Interpolations, FixedSizeArrays, Base.Cartesian
-using RegisterDeformation, RegisterCore, CenterIndexedArrays
+using RegisterDeformation, RegisterCore, CenterIndexedArrays, CachedInterpolations
 using RegisterDeformation: convert_from_fixed, convert_to_fixed
 
 export AffinePenalty, DeformationPenalty, penalty!, interpolate_mm!
@@ -29,12 +29,15 @@ The main exported types/functions are:
 RegisterPenalty
 
 
-abstract DeformationPenalty{T}
-Base.eltype{T}(::Type{DeformationPenalty{T}}) = T
+abstract DeformationPenalty{T,N}
+Base.eltype{T,N}(::Type{DeformationPenalty{T,N}}) = T
 Base.eltype{DP<:DeformationPenalty}(::Type{DP}) = eltype(super(DP))
+Base.eltype(dp::DeformationPenalty) = eltype(typeof(dp))
+Base.ndims{T,N}(::Type{DeformationPenalty{T,N}}) = N
+Base.ndims{DP<:DeformationPenalty}(::Type{DP}) = ndims(super(DP))
+Base.ndims(dp::DeformationPenalty) = ndims(typeof(dp))
 
 """
-
 `p = penalty!(g, ϕ, ϕ_old, dp::DeformationPenalty, mmis, [keep])`
 computes the total penalty (data penalty + regularization penalty)
 associated with a deformation `ϕ`, mismatch data `mmis`, and
@@ -65,8 +68,9 @@ identity`, then no composition is needed, `g_c` is the identity, and
 Note that `ϕ_old`, if not equal to `identity`, must be
 interpolating. In contrast, `ϕ` must not be interpolating.
 
-`g` should be the same type and size as `ϕ.u`, i.e., an array of
-fixed-sized vectors `Vec{N,T}`.
+`g` can be a single `Vector{T}` (for some number-type `T`), or can be
+the same type and size as `ϕ.u`, i.e., an array of fixed-sized vectors
+`Vec{N,T}`.
 
 Further details are described in the help for the individual
 `penalty!` calls.
@@ -89,9 +93,56 @@ function penalty!(g, ϕ, ϕ_old, dp::DeformationPenalty, mmis::AbstractArray, ke
     convert(T, val)
 end
 
+# Allow it to be called without FixedSizeArrays
+function penalty!{T<:Number}(g::Array{T}, ϕ, ϕ_old, dp::DeformationPenalty, mmis::AbstractArray, keep = trues(size(mmis)))
+    gf = RegisterDeformation.convert_to_fixed(g, (ndims(dp), size(ϕ.u)...))
+    penalty!(gf, ϕ, ϕ_old, dp, mmis, keep)
+end
+
+
+"""
+`p = penalty!(gs, ϕs, ϕs_old, dp, λt, mmis, [keeps=trues(size(mmis))])`
+evaluates the total penalty for temporal sequence of deformations
+`ϕs`, using the temporal sequence of mismatch data `mmis`.  `λt` is
+the temporal roughness penalty coefficient.
+"""
+function penalty!{D<:AbstractDeformation}(gs, ϕs::AbstractVector{D}, ϕs_old, dp::DeformationPenalty, λt::Number, mmis::AbstractArray, keep = trues(size(mmis)))
+    ntimes = length(ϕs)
+    size(mmis)[end] == ntimes || throw(DimensionMismatch("Number of deformations $ntimes does not agree with mismatch data of size $(size(mmis))"))
+    s = _penalty!(gs, ϕs, ϕs_old, dp, mmis, keep, 1)
+    for i = 2:ntimes
+        isfinite(s) || break
+        s += _penalty!(gs, ϕs, ϕs_old, dp, mmis, keep, i)
+    end
+    s + penalty!(gs, λt, ϕs)
+end
+
+
+function penalty!{T<:Number,D<:AbstractDeformation}(gs::Array{T}, ϕs::AbstractVector{D}, ϕs_old, dp::DeformationPenalty, λt::Number, mmis::AbstractArray, keep = trues(size(mmis)))
+    gf = RegisterDeformation.convert_to_fixed(gs, (ndims(dp), size(first(ϕs).u)..., length(ϕs)))
+    penalty!(gf, ϕs, ϕs_old, dp, λt, mmis, keep)
+end
+
+function _penalty!{T,N}(gs, ϕs, ϕs_old, dp::DeformationPenalty{T,N}, mmis, keeps, i)
+    colons = ntuple(ColonFun(), Val{N})
+    indexes = (colons..., i)
+    mmi = slice(mmis, indexes)
+    keep = slice(keeps, indexes)
+    calc_gradient = gs != nothing && !isempty(gs)
+    g = calc_gradient ? slice(gs, indexes) : nothing
+    if isa(ϕs_old, AbstractVector)
+        penalty!(g, ϕs[i], ϕs_old[i], dp, mmi, keep)
+    else
+        penalty!(g, ϕs[i], ϕs_old, dp, mmi, keep)
+    end
+end
+
+
 ################
 # Data penalty #
 ################
+
+typealias CenteredInterpolant{T,N,A<:AbstractInterpolation} Union{MismatchArray{T,N,A}, CachedInterpolation{T,N}}
 
 """
 `p = penalty!(g, ϕ, mmis, [keep=trues(size(mmis))])` computes the
@@ -117,11 +168,16 @@ where each index `_i` refers to a single aperture, and each `p_i`
 involves just `mmis[i]` and `ϕ.u[:,i]`.  `mmis[i]` must be
 interpolating, so that it can be evaluated for fractional shifts.
 """
-function penalty!{T,Dim,A<:AbstractInterpolation}(g, ϕ::AbstractDeformation, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
+function penalty!{M<:CenteredInterpolant}(g, ϕ::AbstractDeformation, mmis::AbstractArray{M}, keep=trues(size(mmis)))
     penalty!(g, ϕ.u, mmis, keep)
 end
 
-function penalty!{T,Dim,A<:AbstractInterpolation}(g, u::AbstractArray, mmis::AbstractArray{MismatchArray{T,Dim,A}}, keep=trues(size(mmis)))
+function penalty!{Tg<:Number,M<:CenteredInterpolant}(g::Array{Tg}, ϕ::AbstractDeformation, mmis::AbstractArray{M}, keep=trues(size(mmis)))
+    gf = RegisterDeformation.convert_to_fixed(g, (ndims(ϕ), size(ϕ.u)...))
+    penalty!(gf, ϕ, mmis, keep)
+end
+
+function penalty!{Tu,Dim,M<:CenteredInterpolant}(g, u::AbstractArray{Vec{Dim,Tu}}, mmis::AbstractArray{M}, keep=trues(size(mmis)))
     # This "outer" function just handles the chain rule for computing the
     # total penalty and gradient. The "real" work is done by penalty_nd!.
     nblocks = length(mmis)
@@ -133,7 +189,6 @@ function penalty!{T,Dim,A<:AbstractInterpolation}(g, u::AbstractArray, mmis::Abs
         end
     end
     if calc_gradient
-        Tu = eltype(eltype(u))
         gnd = similar(u, Vec{Dim,NumDenom{Tu}})
         nd = penalty_nd!(gnd, u, mmis, keep)
         N, D = nd.num, nd.denom
@@ -221,9 +276,11 @@ When the deformation is defined on a regular grid, `knots` can be an
 NTuple of knot-vectors; otherwise, it should be an
 `ndims`-by-`npoints` matrix that stores the knot locations in columns.
 """
-type AffinePenalty{T,N} <: DeformationPenalty{T}
+type AffinePenalty{T,N} <: DeformationPenalty{T,N}
     F::Matrix{T}   # geometry data for the affine-residual penalty
     λ::T           # regularization coefficient
+
+    AffinePenalty(F::Matrix{T}, λ::T, _) = new(F, λ)
 
     function AffinePenalty(knots::NTuple{N}, λ)
         gridsize = map(length, knots)
@@ -250,6 +307,7 @@ AffinePenalty{V<:AbstractVector,N}(knots::NTuple{N,V}, λ) = AffinePenalty{eltyp
 AffinePenalty{V<:AbstractVector}(knots::AbstractVector{V}, λ) = AffinePenalty{eltype(V),length(knots)}((knots...), λ)
 AffinePenalty{T}(knots::AbstractMatrix{T}, λ) = AffinePenalty{T,size(knots,1)}(knots, λ)
 
+Base.convert{T,N}(::Type{AffinePenalty{T,N}}, ap::AffinePenalty) = AffinePenalty{T,N}(convert(Matrix{T}, ap.F), convert(T, ap.λ), 0)
 
 """
 `p = penalty!(g, dp::DeformationPenalty, ϕ_c, [g_c])` computes the
@@ -279,13 +337,13 @@ function penalty!{T,N}(g, dp::AffinePenalty, u::AbstractArray{Vec{N,T},N})
         return λ * one(eltype(F)) * one(T)
     end
     n = length(u)
-    U = convert_from_fixed(u, (n,)) # reinterpret(T, u, (N, n))
+    U = convert_from_fixed(u, (n,))
     A = (U*F)*F'   # projection onto an affine transformation
     dU = U-A
     λ /= n
     if g != nothing && !isempty(g)
         λ2 = 2λ
-        du = convert_to_fixed(dU) #reinterpret(Vec{N,T}, dU, (n,))
+        du = convert_to_fixed(Vec{N,T}, dU, (n,))
         for j=1:n
             g[j] = λ2*du[j]
         end
@@ -301,6 +359,76 @@ function penalty!(g, dp::AffinePenalty, ϕ_c, g_c)
         end
     end
     ret
+end
+
+###
+### Temporal penalty
+###
+"""
+`penalty!(g, λt, ϕs)` calculates the temporal penalty
+```
+   (1/2)λt ∑_i (ϕ_{i+1} - ϕ_i)^2
+```
+for a vector `ϕ` of deformations. `g`, if not `nothing`, should be a
+single real-valued vector with number of entries corresponding to all
+of the `u` arrays in all of `ϕs`.
+"""
+function penalty!{D<:GridDeformation}(g, λt::Real, ϕs::Vector{D})
+    if g == nothing || isempty(g)
+        return penalty(λt, ϕs)
+    end
+    ngrid = length(first(ϕs).u)
+    if length(g) != length(ϕs)*ngrid
+        gsize = (size(first(ϕs).u)..., length(ϕs))
+        throw(DimensionMismatch("g's length $(length(g)) inconsistent with $gsize"))
+    end
+    s = zero(eltype(D))
+    λt2 = λt/2
+    for i = 1:length(ϕs)-1
+        ϕ  = ϕs[i]
+        ϕp = ϕs[i+1]
+        goffset = ngrid*(i-1)
+        for k = 1:ngrid
+            du = ϕp.u[k] - ϕ.u[k]
+            dv = λt*du
+            g[goffset+k] -= dv
+            g[goffset+ngrid+k] += dv
+            s += λt2*sumabs2(du)
+        end
+    end
+    s
+end
+
+function penalty!{T<:Number, D<:GridDeformation}(g::Array{T}, λt::Real, ϕs::Vector{D})
+    N = ndims(first(ϕs))
+    sz = size(first(ϕs).u)
+    gf = RegisterDeformation.convert_to_fixed(g, (N, sz..., length(ϕs)))
+    penalty!(gf, λt, ϕs)
+end
+
+function penalty{D<:GridDeformation}(λt::Real, ϕs::Vector{D})
+    s = zero(eltype(D))
+    ngrid = length(first(ϕs).u)
+    λt2 = λt/2
+    for i = 1:length(ϕs)-1
+        ϕ  = ϕs[i]
+        ϕp = ϕs[i+1]
+        for k = 1:ngrid
+            du = ϕp.u[k] - ϕ.u[k]
+            s += λt2*sumabs2(du)
+        end
+    end
+    s
+end
+
+function RegisterDeformation.convert_to_fixed{T,N,A,L}(::Type{GridDeformation{T,N,A,L}}, g::Array{T})
+    reinterpret(Vec{N,T}, g, (div(length(g), N),))
+end
+
+function vec2ϕs{T,N}(x::Array{T}, gridsize::NTuple{N,Int}, n, knots)
+    xr = RegisterDeformation.convert_to_fixed(Vec{N,T}, x, (gridsize..., n))
+    colons = ntuple(d->Colon(), N)::NTuple{N,Colon}
+    [GridDeformation(slice(xr, (colons..., i)), knots) for i = 1:n]
 end
 
 """

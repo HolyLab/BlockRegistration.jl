@@ -4,7 +4,7 @@ module RegisterDeformation
 
 using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, HDF5, JLD, ProgressMeter
 using RegisterUtilities
-using Base.Cartesian
+using Base: Cartesian, tail
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
 
 export
@@ -59,6 +59,10 @@ RegisterDeformation
 abstract AbstractDeformation{T,N}
 Base.eltype{T,N}(::Type{AbstractDeformation{T,N}}) = T
 Base.ndims{T,N}(::Type{AbstractDeformation{T,N}}) = N
+Base.eltype{D<:AbstractDeformation}(::Type{D}) = eltype(super(D))
+Base.ndims{D<:AbstractDeformation}(::Type{D}) = ndims(super(D))
+Base.eltype(d::AbstractDeformation) = eltype(typeof(d))
+Base.ndims(d::AbstractDeformation) = ndims(typeof(d))
 
 """
 `ϕ = GridDeformation(u::Array{FixedVector}, dims)` creates a
@@ -118,14 +122,14 @@ function GridDeformation{FV<:FixedVector,N,L<:Integer}(u::AbstractArray{FV,N},
     T = eltype(FV)
     length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires Vec{$N,T}"))
     knots = ntuple(d->linspace(1,dims[d],size(u,d)), N)
-    GridDeformation{T,N,typeof(u),typeof(knots[1])}(u, knots)
+    GridDeformation{T,N,typeof(u),LinSpace{Float64}}(u, knots)
 end
 
 # Construct from a plain array
 function GridDeformation{T<:Number,N}(u::Array{T}, knots::NTuple{N})
     ndims(u) == N+1 || error("Need $(N+1) dimensions for $N-dimensional deformations")
     size(u,1) == N || error("First dimension of u must be of length $N")
-    uf = convert_to_fixed(u)
+    uf = convert_to_fixed(Vec{N,T}, u, tail(size(u)))
     GridDeformation(uf, knots)
 end
 
@@ -140,42 +144,6 @@ end
 # When knots is a vector
 GridDeformation{V<:AbstractVector}(u, knots::AbstractVector{V}) = GridDeformation(u, (knots...,))
 GridDeformation{R<:Real}(u, knots::AbstractVector{R}) = GridDeformation(u, (knots,))
-
-function convert_to_fixed{T}(u::Array{T}, sz=size(u))
-    N = sz[1]
-    if isbits(T)
-        uf = reinterpret(Vec{N,T}, u, Base.tail(sz))
-    else
-        uf = Array(Vec{N,T}, Base.tail(sz))
-        copy_ctf!(uf, u)
-    end
-    uf
-end
-
-@generated function copy_ctf!{N,T}(dest::Array{Vec{N,T}}, src::Array)
-    exvec = [:(src[offset+$d]) for d=1:N]
-    quote
-        for i = 1:length(dest)
-            offset = (i-1)*N
-            dest[i] = Vec($(exvec...))
-        end
-        dest
-    end
-end
-
-function convert_from_fixed{N,T}(uf::Array{Vec{N,T}}, sz=size(uf))
-    if isbits(T)
-        u = reinterpret(T, uf, (N, sz...))
-    else
-        u = Array(T, (N, sz...))
-        for i = 1:length(uf)
-            for d = 1:N
-                u[d,i] = uf[i][d]
-            end
-        end
-    end
-    u
-end
 
 function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV})
     N = length(FV)
@@ -368,8 +336,6 @@ WarpedArray(data, ϕ::GridDeformation) = WarpedArray(to_etp(data), ϕ)
 
 Base.size(A::WarpedArray) = size(A.data)
 Base.size(A::WarpedArray, i::Integer) = size(A.data, i)
-Base.ndims{T,N}(A::WarpedArray{T,N}) = N
-Base.eltype{T}(A::WarpedArray{T}) = T
 
 @generated function Base.getindex{T,N}(W::WarpedArray{T,N}, x::Number...)
     length(x) == N || error("Must use $N indexes")
@@ -488,39 +454,35 @@ function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ϕ)
 end
 
 """
-`warp!(T, io, img, uarray; [nworkers=1])` writes warped images to
+
+`warp!(T, io, img, ϕs; [nworkers=1])` writes warped images to
 disk. `io` is an `IO` object or HDF5/JLD dataset (the latter must be
 pre-allocated using `d_create` to be of the proper size). `img` is an
-image sequence, and `uarray` is an array of `u` values, one per image
-in `img` (where `size(uarray)[end] == nimages(img)`).  If `nworkers`
-is greater than one, it will spawn additional processes to perform the
-deformation.
+image sequence, and `ϕs` is a vector of deformations, one per image in
+`img`.  If `nworkers` is greater than one, it will spawn additional
+processes to perform the deformation.
+
+An alternative syntax is `warp!(T, io, img, uarray; [nworkers=1])`,
+where `uarray` is an array of `u` values with `size(uarray)[end] ==
+nimages(img)`.
 """
-function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, u; nworkers=1)
+function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, ϕs; nworkers=1)
     n = nimages(img)
     ssz = size(img)[coords_spatial(img)]
     if n == 1
-        if ndims(u) == sdims(img)+1
-            ϕ = GridDeformation(reshape(u, size(u)[1:end-1]), ssz)
-        else
-            ϕ = GridDeformation(u, ssz)
-        end
+        ϕ = extract1(ϕs, sdims(img), ssz)
         destarray = Array(T, ssz)
         warp!(destarray, img, ϕ)
         warp_write(dest, destarray)
         return nothing
     end
-    ndims(u) == sdims(img)+1 || error("u's dimensionality $(ndims(u)) is inconsistent with the number of spatial dimensions $(sdims(img)) of the image")
-    if size(u)[end] != n
-        error("Must have one `u` slice per image")
-    end
+    checkϕdims(ϕs, sdims(img), n)
     if nworkers > 1
-        return _warp!(T, dest, img, u, nworkers)
+        return _warp!(T, dest, img, ϕs, nworkers)
     end
     destarray = Array(T, ssz)
-    colons = [Colon() for d = 1:ndims(u)-1]
     @showprogress 1 "Stacks:" for i = 1:n
-        ϕ = GridDeformation(u[colons..., i], ssz)
+        ϕ = extracti(ϕs, i, ssz)
         warp!(destarray, slice(img, "t", i), ϕ)
         warp_write(dest, destarray, i)
     end
@@ -532,9 +494,8 @@ warp!{T,R<:Real}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, u::
 warp!(dest::Union{HDF5Dataset,JLD.JldDataset}, img, u; nworkers=1) =
     warp!(eltype(dest), dest, img, u; nworkers=nworkers)
 
-function _warp!{T}(::Type{T}, dest, img, u, nworkers)
+function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     n = nimages(img)
-    colons = [Colon() for d = 1:ndims(u)-1]
     ssz = size(img)[coords_spatial(img)]
     wpids = addprocs(nworkers)
     simg = Array(Any, 0)
@@ -558,7 +519,7 @@ function _warp!{T}(::Type{T}, dest, img, u, nworkers)
             warped = swarped[i]
             @async begin
                 while (idx = getnextidx()) <= n
-                    ϕ = GridDeformation(u[colons..., idx], ssz)
+                    ϕ = extracti(ϕs, idx, ssz)
                     copy!(src, slice(img, "t", idx))
                     remotecall_fetch(p, warp!, warped, src, ϕ)
                     put!(writing_mutex, true)
@@ -583,6 +544,32 @@ function warp_write(dest, destarray, i)
     colons = [Colon() for d = 1:ndims(destarray)]
     dest[colons..., i] = destarray
 end
+
+function extract1{V<:Vec}(u::AbstractArray{V}, N, ssz)
+    if ndims(u) == N+1
+        ϕ = GridDeformation(reshape(u, size(u)[1:end-1]), ssz)
+    else
+        ϕ = GridDeformation(u, ssz)
+    end
+    ϕ
+end
+extract1{D<:AbstractDeformation}(ϕs::Vector{D}, N, ssz) = ϕs[1]
+
+function extracti{V<:Vec}(u::AbstractArray{V}, i, ssz)
+    colons = [Colon() for d = 1:ndims(u)-1]
+    GridDeformation(u[colons..., i], ssz)
+end
+extracti{D<:AbstractDeformation}(ϕs::Vector{D}, i, _) = ϕs[i]
+
+function checkϕdims{V<:Vec}(u::AbstractArray{V}, N, n)
+    ndims(u) == N+1 || error("u's dimensionality $(ndims(u)) is inconsistent with the number of spatial dimensions $N of the image")
+    if size(u)[end] != n
+        error("Must have one `u` slice per image")
+    end
+    nothing
+end
+checkϕdims{D<:AbstractDeformation}(ϕs::Vector{D}, N, n) = length(ϕs) == n || error("Must have one `ϕ` per image")
+
 
 """
 `img = warpgrid(ϕ; [scale=1, showidentity=false])` returns an image
@@ -623,6 +610,27 @@ to_etp(etp::AbstractExtrapolation) = etp
 
 to_etp(img, A::AffineTransform) = TransformedArray(to_etp(img), A)
 
+# JLD extensions
+# Serializer for Array{FixedSizeArray{T,...}}
+immutable ArrayFSASerializer{T,DF,DT}
+    A::Array{T,DT}
+end
+
+function JLD.readas{T,DT}(serdata::ArrayFSASerializer{T,1,DT})
+    sz = size(serdata.A)
+    reinterpret(Vec{sz[1],T}, serdata.A, tail(sz))
+end
+function JLD.readas{T,DT}(serdata::ArrayFSASerializer{T,2,DT})
+    sz = size(serdata.A)
+    reinterpret(Mat{sz[1],sz[2],T}, serdata.A, tail(tail(sz)))
+end
+
+function JLD.writeas{FSA<:FixedArray}(A::Array{FSA})
+    T = eltype(FSA)
+    DF = ndims(FSA)
+    ArrayFSASerializer{T,DF,DF+ndims(A)}(reinterpret(T, A, (size(FSA)..., size(A)...)))
+end
+
 # Extensions to Interpolations and FixedSizedArrays
 @generated function vecindex{N}(A::AbstractArray, x::FixedVector{N})
     args = [:(x[$d]) for d = 1:N]
@@ -640,6 +648,47 @@ end
         $meta
         gradient!(g, itp, $(args...))
     end
+end
+
+function convert_to_fixed{T}(u::Array{T}, sz=size(u))
+    N = sz[1]
+    convert_to_fixed(Vec{N, T}, u, tail(sz))
+end
+
+# Unlike the one above, this is type-stable
+function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u, sz=tail(size(u)))
+    if isbits(T)
+        uf = reinterpret(Vec{N,T}, u, sz)
+    else
+        uf = Array(Vec{N,T}, sz)
+        copy_ctf!(uf, u)
+    end
+    uf
+end
+
+@generated function copy_ctf!{N,T}(dest::Array{Vec{N,T}}, src::Array)
+    exvec = [:(src[offset+$d]) for d=1:N]
+    quote
+        for i = 1:length(dest)
+            offset = (i-1)*N
+            dest[i] = Vec($(exvec...))
+        end
+        dest
+    end
+end
+
+function convert_from_fixed{N,T}(uf::AbstractArray{Vec{N,T}}, sz=size(uf))
+    if isbits(T) && isa(uf, Array)
+        u = reinterpret(T, uf, (N, sz...))
+    else
+        u = Array(T, (N, sz...))
+        for i = 1:length(uf)
+            for d = 1:N
+                u[d,i] = uf[i][d]
+            end
+        end
+    end
+    u
 end
 
 # Note this is a bit unsafe as it requires the user to specify C correctly

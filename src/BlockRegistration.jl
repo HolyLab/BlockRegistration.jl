@@ -10,6 +10,7 @@ if !any(LOAD_PATH .== thisdir)
 end
 
 @reexport using CenterIndexedArrays
+@reexport using CachedInterpolations
 @reexport using RegisterCore
 @reexport using RegisterDeformation
 @reexport using RegisterFit

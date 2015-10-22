@@ -39,7 +39,7 @@ E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 @test abs(E0) < eps()
 @test_approx_eq cntr[1] 2
 @test_approx_eq Qf Q
-a = rand(2)
+a = rand(2)+0.1
 Q = a*a'
 num = quadratic(13, 11, [2,-4], Q)
 E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
