@@ -12,6 +12,7 @@ import MathProgBase: SolverInterface
 
 export
     auto_λ,
+    auto_λt,
     fit_sigmoid,
     fixed_λ,
     initial_deformation,
@@ -521,6 +522,7 @@ function optimize!(ϕs, ϕs_old, dp::AffinePenalty, λt, mmis; kwargs...)
     T = eltype(eltype(first(mmis)))
     objective = DeformTseriesOpt(ϕs, ϕs_old, dp, λt, mmis)
     df = DifferentiableFunction(x->SolverInterface.eval_f(objective, x),
+                                (x,g)->SolverInterface.eval_grad_f(objective, g, x),
                                 (x,g)->SolverInterface.eval_grad_f(objective, g, x))
     uvec = u_as_vec(ϕs)
     mxs = maxshift(first(mmis))
@@ -540,6 +542,8 @@ type DeformTseriesOpt{D,Dsold,DP,T,M} <: GradOnlyBoundsOnly
     mmis::M
 end
 
+# Using SolverInterface is a legacy of the old Ipopt interface, but
+# keeping it doesn't hurt anything.
 function SolverInterface.eval_f(d::DeformTseriesOpt, x)
     _copy!(d.ϕs, x)
     penalty!(nothing, d.ϕs, d.ϕs_old, d.dp, d.λt, d.mmis)
@@ -631,8 +635,8 @@ end
 ###
 """
 `ϕ, penalty, λ, datapenalty, quality = auto_λ(cs, Qs, knots,
-affinepenalty, mmis, λmin, λmax)` automatically chooses "the best"
-value of `λ` to serve in the regularization penalty. It tests a
+mmis, (λmin, λmax))` automatically chooses "the best"
+value of `λ` to serve in the spatial regularization penalty. It tests a
 sequence of `λ` values, starting with `λmin` and each successive value
 two-fold larger than the previous; for each such `λ`, it optimizes the
 registration and then evaluates just the "data" portion of the
@@ -643,11 +647,8 @@ enough to begin limiting the form of the deformation, but not yet to
 substantially decrease the quality of the registration).
 
 `cs` and `Qs` come from `qfit`, `knots` specifies the deformation
-grid, `affinepenalty` the `AffinePenalty` object for that grid (the
-value of `lambda` that you used to create the object is unimportant,
-it will be replaced with the sequence described above), and `mmis` is
-the array-of-mismatch arrays (already interpolating, see
-`interpolate_mm!`).
+grid, and `mmis` is the array-of-mismatch arrays (already
+interpolating, see `interpolate_mm!`).
 
 As a first pass, try setting `λmin=1e-6` and `λmax=100`. You can plot
 the returned `datapenalty` and check that it is approximately
@@ -659,14 +660,45 @@ of `λ`, `datapenalty` is a vector containing the data penalty for each
 tested `λ` value, and `quality` an estimate (possibly broken) of the
 fidelity of the sigmoidal fit.
 
+If you have data for an image sequence, `auto_λ(stackindex, cs, Qs,
+knots, mmis, (λmin, λmax))` will perform the analysis on the chosen
+`stackindex`.
+
 See also: `fixed_λ`. Because `auto_λ` performs the optimization
 repeatedly for many different `λ`s, it is slower than `fixed_λ`.
 """
-function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λmin, λmax)
+function auto_λ{N}(cs, Qs, knots::NTuple{N}, mmis, λrange)
+    ap = AffinePenalty{Float64,N}(knots, λrange[1])  # default to affine-residual penalty, Ipopt needs Float64
+    auto_λ(cs, Qs, knots, ap, mmis, λrange)
+end
+
+function auto_λ{N}(stackidx::Integer, cs, Qs, knots::NTuple{N}, mmis, λrange)
+    cs1 = cs[ntuple(d->Colon(),ndims(cs)-1)..., stackidx];
+    Qs1 = Qs[ntuple(d->Colon(),ndims(Qs)-1)..., stackidx];
+    mmis1 = mmis[ntuple(d->Colon(),ndims(mmis)-1)..., stackidx];
+    auto_λ(cs1, Qs1, knots, mmis1, λrange)
+end
+
+function auto_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis::Array{Tf}, λrange)
+    # Ipopt requires Float64
+    auto_λ(convert(Array{Float64}, cs), convert(Array{Float64}, Qs), knots, ap, convert(Array{Float64}, mmis), λrange)
+end
+
+function auto_λ{T,N}(cs::Array{Float64}, Qs::Array{Float64}, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis::Array{Float64}, λrange)
+    csr = reinterpret(Vec{N,Float64}, cs, tail(size(cs)))
+    Qsr = reinterpret(Mat{N,N,Float64}, Qs, tail(tail(size(Qs))))
+    mmisr = reinterpret(NumDenom{Float64}, mmis, tail(size(mmis)))
+    mmisc = cachedinterpolators(mmisr, N, ntuple(d->(size(mmisr,d)+1)>>1, N))
+    ap64 = convert(AffinePenalty{Float64,N}, ap)
+    auto_λ(csr, Qsr, knots, ap64, mmisc, λrange)
+end
+
+function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λrange)
+    λmin, λmax = λrange
     gridsize = map(length, knots)
     uc = zeros(T, N, gridsize...)
     for i = 1:length(cs)
-        uc[:,i] = cs[i]
+        uc[:,i] = convert(Vector{T}, cs[i])
     end
     function optimizer!(x, mu_init)
         local pnew
@@ -690,23 +722,25 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     uclamp!(u0, maxshift)
     ϕap = GridDeformation(u0, knots)
     ϕap, penaltyap = optimizer!(ϕap, mu_init)
-    penalty_all = typeof(penaltyprev)[]
+    n = ceil(Int, log2(λmax) - log2(λmin))
+    λ_all = Array(typeof(λmin), n)
+    penalty_all = similar(λ_all, typeof(penaltyprev))
     datapenalty_all = similar(penalty_all)
     ϕ_all = Any[]
     # Keep the lower penalty, but for the purpose of the sigmoidal fit
     # evaluate just the data penalty
     if penaltyprev < penaltyap
-        push!(penalty_all, penaltyprev)
-        push!(datapenalty_all, penalty!(nothing, ϕprev, mmis))
+        penalty_all[1] = penaltyprev
+        datapenalty_all[1] = penalty!(nothing, ϕprev, mmis)
         push!(ϕ_all, ϕprev)
     else
-        push!(penalty_all, penaltyap)
-        push!(datapenalty_all, penalty!(nothing, ϕap, mmis))
+        penalty_all[1] = penaltyap
+        datapenalty_all[1] = penalty!(nothing, ϕap, mmis)
         push!(ϕ_all, ϕap)
     end
-    λ_all = [λ]
-    λ *= 2
-    while λ < λmax
+    λ_all[1] = λ
+    @showprogress 1 "Calculating penalty vs. λ: " for i = 2:n
+        λ *= 2
         ap.λ = λ
         ϕprev = GridDeformation(copy(ϕ_all[end].u), knots)
         ϕprev, penaltyprev = optimizer!(ϕprev, mu_init)
@@ -718,21 +752,20 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
         ϕap = GridDeformation(u0, knots)
         ϕap, penaltyap = optimizer!(ϕap, mu_init)
         if penaltyprev < penaltyap
-            push!(penalty_all, penaltyprev)
-            push!(datapenalty_all, penalty!(nothing, ϕprev, mmis))
+            penalty_all[i] = penaltyprev
+            datapenalty_all[i] = penalty!(nothing, ϕprev, mmis)
             push!(ϕ_all, ϕprev)
         else
-            push!(penalty_all, penaltyap)
-            push!(datapenalty_all, penalty!(nothing, ϕap, mmis))
+            penalty_all[i] = penaltyap
+            datapenalty_all[i] = penalty!(nothing, ϕap, mmis)
             push!(ϕ_all, ϕap)
         end
-        push!(λ_all, λ)
-        λ *= 2
+        λ_all[i] = λ
     end
     bottom, top, center, width, val = fit_sigmoid(datapenalty_all)
     idx = max(1, round(Int, center-width))
     quality = val/(top-bottom)^2/length(datapenalty_all)
-    ϕ_all[idx], penalty_all[idx], λ_all[idx], datapenalty_all, quality
+    ϕ_all[idx], penalty_all[idx], λ_all[idx], λ_all, datapenalty_all, quality
 end
 
 # Because of the long run times, here we only use the quadratic approximation
@@ -741,7 +774,9 @@ end
 the whole-experiment mismatch penalty as a function of `λt`, choosing
 values starting at `λtmin` and increasing two-fold until `λtmax`.
 `Es`, `cs`, and `Qs` come from the quadratic fix of the mismatch, and
-`ap` is the (spatial) affine-residual penalty.
+`ap` is the (spatial) affine-residual penalty.  As a first guess, try
+`λtmin=1e-6` and `λtmax=1`.  (Larger values of `λt` are noticeably
+slower to optimize.)
 
 By plotting `datapenalty` vs `λts` (with a log-scale on the x-axis),
 you can find the "kink" at which the value of `λt` begins to constrain
