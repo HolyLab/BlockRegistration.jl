@@ -145,7 +145,7 @@ Base.size{N}(itp::CoefsWrapper{N}, d) = d <= N ? size(itp.coefs, d) : 1
 @generated function Interpolations.gradient!{T,N,M,O}(g::AbstractVector, A::CachedInterpolation{T,N,M,O}, ys::Number...)
     length(ys) == N || error("Must use $N indexes")
     IT = Tuple{ntuple(d->BSpline{Quadratic{InPlace}}, N)..., NoInterp}
-    BS = Interpolations.BSplineInterpolation{T,N+1,T,IT,OnCell,0}
+    BS = Interpolations.BSplineInterpolation{T,N+1,Array{T,N},IT,OnCell,0}
     ex = Interpolations.gradient_impl(BS)
     quote
         xs = @ntuple $(N+1) d->(d <= $N ? ys[d] - round(Int, ys[d]) + 2 : A.tileindex)
