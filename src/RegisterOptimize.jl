@@ -8,7 +8,6 @@ using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base: Test, tail
 
 import Base: *
-import MathProgBase: SolverInterface
 
 export
     auto_λ,
@@ -35,30 +34,30 @@ RegisterOptimize
 
 
 # Some conveniences for MathProgBase
-abstract GradOnly <: SolverInterface.AbstractNLPEvaluator
+abstract GradOnly <: MathProgBase.AbstractNLPEvaluator
 
-function SolverInterface.initialize(d::GradOnly, requested_features::Vector{Symbol})
+function MathProgBase.initialize(d::GradOnly, requested_features::Vector{Symbol})
     for feat in requested_features
         if !(feat in [:Grad, :Jac])
             error("Unsupported feature $feat")
         end
     end
 end
-SolverInterface.features_available(d::GradOnly) = [:Grad, :Jac]
+MathProgBase.features_available(d::GradOnly) = [:Grad, :Jac]
 
 
 abstract GradOnlyBoundsOnly <: GradOnly
 
-SolverInterface.eval_g(::GradOnlyBoundsOnly, g, x) = nothing
-SolverInterface.jac_structure(::GradOnlyBoundsOnly) = Int[], Int[]
-SolverInterface.eval_jac_g(::GradOnlyBoundsOnly, J, x) = nothing
+MathProgBase.eval_g(::GradOnlyBoundsOnly, g, x) = nothing
+MathProgBase.jac_structure(::GradOnlyBoundsOnly) = Int[], Int[]
+MathProgBase.eval_jac_g(::GradOnlyBoundsOnly, J, x) = nothing
 
 
-abstract BoundsOnly <: SolverInterface.AbstractNLPEvaluator
+abstract BoundsOnly <: MathProgBase.AbstractNLPEvaluator
 
-SolverInterface.eval_g(::BoundsOnly, g, x) = nothing
-SolverInterface.jac_structure(::BoundsOnly) = Int[], Int[]
-SolverInterface.eval_jac_g(::BoundsOnly, J, x) = nothing
+MathProgBase.eval_g(::BoundsOnly, g, x) = nothing
+MathProgBase.jac_structure(::BoundsOnly) = Int[], Int[]
+MathProgBase.eval_jac_g(::BoundsOnly, J, x) = nothing
 
 
 # Some necessary ForwardDiff extensions to make Interpolations work
@@ -97,16 +96,16 @@ function optimize_rigid(fixed, moving, A::AffineTransform, maxshift, SD = eye(nd
                          print_level=print_level,
                          sb="yes",
                          tol=tol)
-    m = SolverInterface.model(solver)
+    m = MathProgBase.NonlinearModel(solver)
     ub = T[fill(pi, length(p0)-length(maxshift)); [maxshift...]]
-    SolverInterface.loadnonlinearproblem!(m, length(p0), 0, -ub, ub, T[], T[], :Min, objective)
-    SolverInterface.setwarmstart!(m, p0)
-    SolverInterface.optimize!(m)
+    MathProgBase.loadproblem!(m, length(p0), 0, -ub, ub, T[], T[], :Min, objective)
+    MathProgBase.setwarmstart!(m, p0)
+    MathProgBase.optimize!(m)
 
-    stat = SolverInterface.status(m)
+    stat = MathProgBase.status(m)
     stat == :Optimal || warn("Solution was not optimal")
-    p = SolverInterface.getsolution(m)
-    fval = SolverInterface.getobjval(m)
+    p = MathProgBase.getsolution(m)
+    fval = MathProgBase.getobjval(m)
 
     p2rigid(p, SD), fval
 end
@@ -131,7 +130,7 @@ to_float{T}(::Type{T}, A, B) = convert(Array{Float32}, A), convert(Array{Float32
 ###
 ### Rigid registration from raw images, MathProg interface
 ###
-type RigidValue{N,A<:AbstractArray,I<:AbstractExtrapolation,SDT} <: SolverInterface.AbstractNLPEvaluator
+type RigidValue{N,A<:AbstractArray,I<:AbstractExtrapolation,SDT} <: MathProgBase.AbstractNLPEvaluator
     fixed::A
     wfixed::A
     moving::I
@@ -173,8 +172,8 @@ function RigidOpt(fixed, moving, SD, thresh)
     RigidOpt(rv, g)
 end
 
-SolverInterface.eval_f(d::RigidOpt, x) = d.rv(x)
-SolverInterface.eval_grad_f(d::RigidOpt, grad_f, x) =
+MathProgBase.eval_f(d::RigidOpt, x) = d.rv(x)
+MathProgBase.eval_grad_f(d::RigidOpt, grad_f, x) =
     copy!(grad_f, d.g(x))
 
 ###
@@ -358,22 +357,22 @@ function find_opt{AP,M,N,Φ<:GridDeformation}(P::AffineQHessian{AP,M,N,Φ}, b, m
     solver = IpoptSolver(hessian_approximation="limited-memory",
                          print_level=0,
                          sb="yes")
-    m = SolverInterface.model(solver)
+    m = MathProgBase.NonlinearModel(solver)
     T = eltype(b)
     n = length(b)
     ub1 = T[maxshift...] - T(RegisterFit.register_half)
     ub = repeat(ub1, outer=[div(n, length(maxshift))])
-    SolverInterface.loadnonlinearproblem!(m, n, 0, -ub, ub, T[], T[], :Min, objective)
-    SolverInterface.setwarmstart!(m, x0)
-    SolverInterface.optimize!(m)
-    stat = SolverInterface.status(m)
+    MathProgBase.loadproblem!(m, n, 0, -ub, ub, T[], T[], :Min, objective)
+    MathProgBase.setwarmstart!(m, x0)
+    MathProgBase.optimize!(m)
+    stat = MathProgBase.status(m)
     stat == :Optimal || warn("Solution was not optimal")
-    SolverInterface.getsolution(m)
+    MathProgBase.getsolution(m)
 end
 
 # We omit the constant term ∑_i cs[i]'*Qs[i]*cs[i], since it won't
 # affect the solution
-SolverInterface.eval_f(d::InitialDefOpt, x::AbstractVector) =
+MathProgBase.eval_f(d::InitialDefOpt, x::AbstractVector) =
     _eval_f(d.P, d.b, x)
 
 function _eval_f{T,N}(P::AffineQHessian{AffinePenalty{T,N}}, b, x::AbstractVector)
@@ -391,7 +390,7 @@ function _eval_f{T,N}(P::AffineQHessian{AffinePenalty{T,N}}, b, x::AbstractVecto
     val
 end
 
-function SolverInterface.eval_grad_f(d::InitialDefOpt, grad_f, x)
+function MathProgBase.eval_grad_f(d::InitialDefOpt, grad_f, x)
     P, b = d.P, d.b
     copy!(grad_f, P*x-b)
 end
@@ -441,19 +440,19 @@ function _optimize!(objective, ϕ, dp, mmis, tol, print_level; kwargs...)
                          print_level=print_level,
                          sb="yes",
                          tol=tol, kwargs...)
-    m = SolverInterface.model(solver)
+    m = MathProgBase.NonlinearModel(solver)
     ub1 = T[mxs...] - T(RegisterFit.register_half)
     ub = repeat(ub1, outer=[div(length(uvec), length(ub1))])
-    SolverInterface.loadnonlinearproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
-    SolverInterface.setwarmstart!(m, uvec)
-    fval0 = SolverInterface.eval_f(objective, uvec)
+    MathProgBase.loadproblem!(m, length(uvec), 0, -ub, ub, T[], T[], :Min, objective)
+    MathProgBase.setwarmstart!(m, uvec)
+    fval0 = MathProgBase.eval_f(objective, uvec)
     isfinite(fval0) || error("Initial value must be finite")
-    SolverInterface.optimize!(m)
+    MathProgBase.optimize!(m)
 
-    stat = SolverInterface.status(m)
+    stat = MathProgBase.status(m)
     stat == :Optimal || warn("Solution was not optimal")
-    uopt = SolverInterface.getsolution(m)
-    fval = SolverInterface.getobjval(m)
+    uopt = MathProgBase.getsolution(m)
+    fval = MathProgBase.getobjval(m)
     _copy!(ϕ, uopt)
     ϕ, fval, fval0
 end
@@ -493,13 +492,13 @@ type DeformOpt{D,Dold,DP,M} <: GradOnlyBoundsOnly
     mmis::M
 end
 
-function SolverInterface.eval_f(d::DeformOpt, x)
+function MathProgBase.eval_f(d::DeformOpt, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(nothing, d.ϕ, d.ϕ_old, d.dp, d.mmis)
 end
 
-function SolverInterface.eval_grad_f(d::DeformOpt, grad_f, x)
+function MathProgBase.eval_grad_f(d::DeformOpt, grad_f, x)
     uvec = u_as_vec(d.ϕ)
     copy!(uvec, x)
     penalty!(vec_as_u(grad_f, d.ϕ), d.ϕ, d.ϕ_old, d.dp, d.mmis)
@@ -521,9 +520,9 @@ temporal penalty coefficient `λt`.
 function optimize!(ϕs, ϕs_old, dp::AffinePenalty, λt, mmis; kwargs...)
     T = eltype(eltype(first(mmis)))
     objective = DeformTseriesOpt(ϕs, ϕs_old, dp, λt, mmis)
-    df = DifferentiableFunction(x->SolverInterface.eval_f(objective, x),
-                                (x,g)->SolverInterface.eval_grad_f(objective, g, x),
-                                (x,g)->SolverInterface.eval_grad_f(objective, g, x))
+    df = DifferentiableFunction(x->MathProgBase.eval_f(objective, x),
+                                (x,g)->MathProgBase.eval_grad_f(objective, g, x),
+                                (x,g)->MathProgBase.eval_grad_f(objective, g, x))
     uvec = u_as_vec(ϕs)
     mxs = maxshift(first(mmis))
     ub1 = T[mxs...] - T(RegisterFit.register_half)
@@ -542,14 +541,14 @@ type DeformTseriesOpt{D,Dsold,DP,T,M} <: GradOnlyBoundsOnly
     mmis::M
 end
 
-# Using SolverInterface is a legacy of the old Ipopt interface, but
+# Using MathProgBase is a legacy of the old Ipopt interface, but
 # keeping it doesn't hurt anything.
-function SolverInterface.eval_f(d::DeformTseriesOpt, x)
+function MathProgBase.eval_f(d::DeformTseriesOpt, x)
     _copy!(d.ϕs, x)
     penalty!(nothing, d.ϕs, d.ϕs_old, d.dp, d.λt, d.mmis)
 end
 
-function SolverInterface.eval_grad_f(d::DeformTseriesOpt, grad_f, x)
+function MathProgBase.eval_grad_f(d::DeformTseriesOpt, grad_f, x)
     _copy!(d.ϕs, x)
     penalty!(grad_f, d.ϕs, d.ϕs_old, d.dp, d.λt, d.mmis)
 end
@@ -965,20 +964,20 @@ function fit_sigmoid(data, bottom, top, center, width)
     length(data) >= 4 || error("Too few data points for sigmoidal fit")
     objective = SigmoidOpt(data)
     solver = IpoptSolver(print_level=0, sb="yes")
-    m = SolverInterface.model(solver)
+    m = MathProgBase.NonlinearModel(solver)
     x0 = Float64[bottom, top, center, width]
     mn, mx = extrema(data)
     ub = [mx, mx, length(data), length(data)]
     lb = [mn, mn, 1, 0.1]
-    SolverInterface.loadnonlinearproblem!(m, 4, 0, lb, ub, Float64[], Float64[], :Min, objective)
-    SolverInterface.setwarmstart!(m, x0)
-    SolverInterface.optimize!(m)
+    MathProgBase.loadproblem!(m, 4, 0, lb, ub, Float64[], Float64[], :Min, objective)
+    MathProgBase.setwarmstart!(m, x0)
+    MathProgBase.optimize!(m)
 
-    stat = SolverInterface.status(m)
+    stat = MathProgBase.status(m)
     stat == :Optimal || warn("Solution was not optimal")
-    x = SolverInterface.getsolution(m)
+    x = MathProgBase.getsolution(m)
 
-    x[1], x[2], x[3], x[4], SolverInterface.getobjval(m)
+    x[1], x[2], x[3], x[4], MathProgBase.getobjval(m)
 end
 
 function fit_sigmoid(data)
@@ -999,21 +998,21 @@ end
 
 SigmoidOpt(data::Vector{Float64}) = SigmoidOpt(data, ForwardDiff.gradient(x->sigpenalty(x, data)), ForwardDiff.hessian(x->sigpenalty(x, data)))
 
-function SolverInterface.initialize(d::SigmoidOpt, requested_features::Vector{Symbol})
+function MathProgBase.initialize(d::SigmoidOpt, requested_features::Vector{Symbol})
     for feat in requested_features
         if !(feat in [:Grad, :Jac, :Hess])
             error("Unsupported feature $feat")
         end
     end
 end
-SolverInterface.features_available(d::SigmoidOpt) = [:Grad, :Jac, :Hess]
+MathProgBase.features_available(d::SigmoidOpt) = [:Grad, :Jac, :Hess]
 
-SolverInterface.eval_f(d::SigmoidOpt, x) = sigpenalty(x, d.data)
+MathProgBase.eval_f(d::SigmoidOpt, x) = sigpenalty(x, d.data)
 
-SolverInterface.eval_grad_f(d::SigmoidOpt, grad_f, x) =
+MathProgBase.eval_grad_f(d::SigmoidOpt, grad_f, x) =
     copy!(grad_f, d.g(x))
 
-function SolverInterface.hesslag_structure(d::SigmoidOpt)
+function MathProgBase.hesslag_structure(d::SigmoidOpt)
     I, J = Int[], Int[]
     for i in CartesianRange((4,4))
         push!(I, i[1])
@@ -1022,13 +1021,13 @@ function SolverInterface.hesslag_structure(d::SigmoidOpt)
     (I, J)
 end
 
-function SolverInterface.eval_hesslag(d::SigmoidOpt, H, x, σ, μ)
+function MathProgBase.eval_hesslag(d::SigmoidOpt, H, x, σ, μ)
     copy!(H, σ * d.h(x))
 end
 
 function sigpenalty(x, data)
     bottom, top, center, width = x[1], x[2], x[3], x[4]
-    sumabs2((data-bottom)/(top-bottom) - 1./(1+exp(-((1:length(data))-center)/width)))
+    sumabs2((data-bottom)/(top-bottom) - 1./(1+exp(-(collect(1:length(data))-center)/width)))
 end
 
 @generated function RegisterCore.maxshift{T,N}(A::CachedInterpolation{T,N})

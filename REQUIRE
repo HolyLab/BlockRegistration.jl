@@ -1,9 +1,9 @@
 Images
 Interpolations
-AffineTransforms
+AffineTransforms 0.1.3
 FixedSizeArrays
 NLsolve
-MathProgBase
+MathProgBase 0.4
 Ipopt
 IterativeSolvers
 CUDArt
