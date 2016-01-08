@@ -17,6 +17,7 @@ export
     compose,
     eachknot,
     tform2deformation,
+    tinterpolate,
     translate,
     vecindex,
     vecgradient!,
@@ -599,6 +600,36 @@ function warpgrid(ϕ; scale=1, showidentity::Bool=false)
         return reinterpret(RGB{Float32}, permutedims(cat(n, wimg, img, wimg), (n,1:ndims(img)...)))
     end
     wimg
+end
+
+"""
+`ϕs = tinterpolate(ϕsindex, tindex, nstack)` uses linear
+interpolation/extrapolation in time to "fill out" to times `1:nstack`
+a deformation defined intermediate times `tindex` . Note that
+`ϕs[tindex] == ϕsindex`.
+"""
+function tinterpolate(ϕsindex, tindex, nstack)
+    ϕs = Array(eltype(ϕsindex), nstack)
+    # Before the first tindex
+    k = 0
+    for i in 1:tindex[1]-1
+        ϕs[k+=1] = ϕsindex[1]
+    end
+    # Within tindex
+    for i in 2:length(tindex)
+        ϕ1 = ϕsindex[i-1]
+        ϕ2 = ϕsindex[i]
+        Δt = tindex[i] - tindex[i-1]
+        for j = 0:Δt-1
+            α = convert(eltype(eltype(ϕ1.u)), j/Δt)
+            ϕs[k+=1] = GridDeformation((1-α)*ϕ1.u + α*ϕ2.u, ϕ2.knots)
+        end
+    end
+    # After the last tindex
+    for i in tindex[end]:nstack
+        ϕs[k+=1] = ϕsindex[end]
+    end
+    return ϕs
 end
 
 # TODO?: do we need to return real values beyond-the-edge for a SubArray?
