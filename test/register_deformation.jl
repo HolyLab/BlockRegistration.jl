@@ -284,3 +284,16 @@ save(fn, "ϕ", ϕ)
 @test ϕ2.knots == ϕ.knots
 str = readall(`h5dump $fn`)
 @test !isempty(search(str, "SIMPLE { ( 5, 3, 2 ) / ( 5, 3, 2 ) }"))
+
+# temporal interpolation
+u2 = [1.0 1.0]
+u4 = [3.0 3.0]
+knots = (linspace(1,20,2),)
+ϕ2 = RegisterDeformation.GridDeformation(u2, knots)
+ϕ4 = RegisterDeformation.GridDeformation(u4, knots)
+ϕsindex = [ϕ2, ϕ4]
+ϕs = RegisterDeformation.tinterpolate(ϕsindex, [2,4], 5)
+@test length(ϕs) == 5
+@test eltype(ϕs) == eltype(ϕsindex)
+@test all(ϕs[1].u .== Vec(1.0))
+@test all(ϕs[3].u .== Vec(2.0))
