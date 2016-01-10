@@ -1,10 +1,13 @@
+nt = 3  # number of time points
+wpids = addprocs(min(nt, 3))
+
 using BlockRegistration, BlockRegistrationScheduler, Images, JLD, FixedSizeArrays
+# using CUDArt
 using Base.Test
 
 for (sz, mxshift, gridsize, so) in (((150,), (6,), (4,), ["x"]),
-                                ((150,140), (6,5), (4,3), ["x", "y"]),
-                                ((150,140,15), (6,5,2), (4,3,3), ["x", "y", "z"]))
-    nt = 3  # number of time points
+                                    ((150,140), (6,5), (4,3), ["x", "y"]),
+                                    ((150,140,15), (6,5,2), (4,3,3), ["x", "y", "z"]))
     N = length(sz)
     knots = ntuple(d->linspace(1,sz[d],gridsize[d]), N)
     # Create a fixed image with a uniform background except for one bright
@@ -13,18 +16,19 @@ for (sz, mxshift, gridsize, so) in (((150,), (6,), (4,), ["x"]),
     # with valid values gets exploited by the mismatch computation.
     padsz = [mxshift...]+ceil(Int, [sz...]/2)  # excessive, but who cares?
     fullsz = (([sz...]+2padsz...)...,)
-    fixed_full = fill(1.0, fullsz)
+    fixed_full = SharedArray(Float64, fullsz)
+    fill!(fixed_full, 1)
     fixed = sub(fixed_full, ntuple(d->padsz[d]+1:padsz[d]+sz[d], N))
     for I in CartesianRange(gridsize)
         c = [round(Int, knots[d][I[d]]) for d = 1:N]
         fixed[c...] = 2
     end
 
-    # The moving image has the bright pixel displaced.
+    # The moving image displaces the bright pixel.
     # Make sure the shift won't move bright pixel into a different aperture
 #    @assert all([sz...]./[gridsize...] .> 4*[mxshift...])
     movingsz = (fullsz..., nt)
-    moving_full = similar(fixed, movingsz)
+    moving_full = SharedArray(Float64, movingsz)
     fill!(moving_full, 1)
     moving = sub(moving_full, (ntuple(d->padsz[d]+1:padsz[d]+sz[d], N)..., :))
     displacements = Array(NTuple{N,Array{Int,N}}, nt)
@@ -41,7 +45,10 @@ for (sz, mxshift, gridsize, so) in (((150,), (6,), (4,), ["x"]),
     ### Compute the mismatch
     baseout = tempname()
     fnmm = string(baseout, ".mm")
-    algorithm = AperturesMismatch(fixed, knots, mxshift; correctbias=false) # TODO: CUDA
+    # devs = 0:2
+    # wait_free(devs)
+    # algorithm = AperturesMismatch[AperturesMismatch(fixed, knots, mxshift; dev=devs[i],pid=wpids[i],correctbias=false) for i = 1:length(wpids)]
+    algorithm = AperturesMismatch[AperturesMismatch(fixed, knots, mxshift; pid=wpids[i], correctbias=false) for i = 1:length(wpids)]
     mon = monitor(algorithm, (:Es, :cs, :Qs, :mmis))
 
     driver(fnmm, algorithm, img, mon)
@@ -63,7 +70,7 @@ for (sz, mxshift, gridsize, so) in (((150,), (6,), (4,), ["x"]),
         @test (1+1e-8)*minimum(den1) > maximum(den1)
     end
     # Test that a perfect match was found in each aperture
-    @test all(Es .< 1e-12)
+    @test all(Es .< 1e-12) # if this fails, make sure checkbias=false above
     # Test that the displacement is correct
     for t = 1:nt
         for d = 1:N
@@ -80,3 +87,5 @@ for (sz, mxshift, gridsize, so) in (((150,), (6,), (4,), ["x"]),
     u = reinterpret(Float64, ur, (N, size(ur)...))
     @test maxabs(u-cs) <= 1e-3
 end
+
+rmprocs(wpids)
