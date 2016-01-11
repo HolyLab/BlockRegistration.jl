@@ -1,4 +1,5 @@
 import BlockRegistration, RegisterCore
+using CenterIndexedArrays
 using Base.Test
 
 nd = RegisterCore.NumDenom(3.5,10)
@@ -24,3 +25,19 @@ mma = RegisterCore.MismatchArray(num,denom)
 denom = reshape(float(1:25), 5, 5)
 mma = RegisterCore.MismatchArray(num,denom)
 @test RegisterCore.indmin_mismatch(mma, 0) == CartesianIndex((0,1))
+
+# SubArray padding and trimming
+A = reshape(1:125, 5, 5, 5)
+S = slice(A, 2:4, 1:3, 2)
+Spad = RegisterCore.paddedview(S)
+@test Spad == A[:,:,2]
+S2 = RegisterCore.trimmedview(A[:,:,2], S)
+@test S2 == S
+S = slice(A, 2:4, 2, 1:3)
+Spad = RegisterCore.paddedview(S)
+Aslice = slice(A, :, 2, :)
+@test Spad == Aslice
+S2 = RegisterCore.trimmedview(copy(Aslice), S)
+@test S2 == S
+S2 = RegisterCore.trimmedview(Aslice, S)
+@test S2 == S

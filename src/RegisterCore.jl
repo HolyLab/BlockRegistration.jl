@@ -23,7 +23,9 @@ export
     maxshift,
     mismatcharrays,
     ratio,
-    separate
+    separate,
+    paddedview,
+    trimmedview
 
 """
 # RegisterCore
@@ -421,6 +423,53 @@ function highpass{T}(::Type{T}, data::AbstractArray, sigma)
 end
 highpass{T<:AbstractFloat}(data::AbstractArray{T}, sigma) = highpass(T, data, sigma)
 highpass(data::AbstractArray, sigma) = highpass(Float32, data, sigma)
+
+
+"""
+`Apad = paddedview(A)`, for a SubArray `A`, returns a SubArray that
+extends to the full parent along any non-sliced dimensions of the
+parent.
+
+See also `trimmedview`.
+"""
+paddedview(A::SubArray) = _paddedview(A, (), (), A.indexes...)
+_paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
+    SubArray{T,N,P,I,0}(A.parent, newindexes, newsize, 0, 0) # punt on first_index
+@inline function _paddedview(A, newindexes, newsize, index, indexes...)
+    d = length(newindexes)+1
+    _paddedview(A, (newindexes..., pdindex(A.parent, d, index)), pdsize(A.parent, newsize, d, index), indexes...)
+end
+pdindex(A, d, i::Colon) = i
+pdindex(A, d, i::Real) = i
+pdindex(A, d, i::UnitRange) = 1:size(A,d)
+pdindex(A, d, i) = error("Cannot pad with an index of type ", typeof(i))
+
+pdsize(A, newsize, d, i::Colon) = tuple(newsize..., size(A,d))
+pdsize(A, newsize, d, i::Real) = newsize
+pdsize(A, newsize, d, i::UnitRange) = tuple(newsize..., size(A,d))
+
+"""
+`B = trimmedview(Bpad, A::SubArray)` returns a SubArray `B` with
+`size(B) = size(A)`, taking hints from the slice indexes of `A` about
+the view region. `Bpad` must have the same size as `paddedview(A)`.
+
+See also `paddedview`.
+"""
+function trimmedview(Bpad, A::SubArray)
+    ndims(Bpad) == ndims(A) || throw(DimensionMismatch("dimensions $(ndims(Bpad)) and $(ndims(A)) of Bpad and A must match"))
+    _trimmedview(Bpad, A.parent, 1, (), A.indexes...)
+end
+_trimmedview(Bpad, P, d, newindexes) = sub(Bpad, newindexes)
+@inline _trimmedview(Bpad, P, d, newindexes, index::Real, indexes...) =
+    _trimmedview(Bpad, P, d+1, newindexes, indexes...)
+@inline function _trimmedview(Bpad, P, d, newindexes, index, indexes...)
+    dB = length(newindexes)+1
+    Bsz = size(Bpad, dB)
+    Psz = size(P, d)
+    Bsz == Psz || throw(DimensionMismatch("dimension $dB of Bpad has size $Bsz, should have size $Psz"))
+    _trimmedview(Bpad, P, d+1, (newindexes..., index), indexes...)
+end
+
 
 # For faster and type-stable slicing
 immutable ColonFun end
