@@ -181,7 +181,7 @@ MathProgBase.eval_grad_f(d::RigidOpt, grad_f, x) =
 ### quadratic-fit mismatch data
 ###
 """
-`u0 = initial_deformation(ap::AffinePenalty, cs, Qs;
+`u0, converged = initial_deformation(ap::AffinePenalty, cs, Qs;
 [ϕ_old=identity])` prepares a globally-optimal initial guess for a
 deformation, given a quadratic fit to the aperture-wise mismatch
 data. `cs` and `Qs` must be arrays-of-arrays in the shape of the

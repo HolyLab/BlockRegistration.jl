@@ -19,19 +19,34 @@ end
 @test RegisterMismatch.aperture_range((15,), (7,)) == (12:18,)
 
 # Bias correction
-mma = fill(NumDenom(2.0,0.5), 3, 3)
+val = NumDenom(2.0,0.5)
+# 2d
+mma = fill(val, 3, 3)
 for i = 1:3
     mma[2,i] = NumDenom(rand(),rand())
     mma[i,2] = NumDenom(rand(),rand())
 end
 mm = CenterIndexedArray(mma)
 RegisterMismatch.correctbias!(mm)
-mm1 = mm[0,0]
 for I in eachindex(mm)
     mmI = mm[I]
-    @test_approx_eq mmI.num mm1.num
-    @test_approx_eq mmI.denom mm1.denom
+    @test_approx_eq mmI.num val.num
+    @test_approx_eq mmI.denom val.denom
 end
+# 3d
+mma = fill(val, 3, 3, 3)
+for i = 1:3, j = 1:3
+    mma[2,i,j] = NumDenom(rand(),rand())
+    mma[i,2,j] = NumDenom(rand(),rand())
+end
+mm = CenterIndexedArray(mma)
+RegisterMismatch.correctbias!(mm)
+for I in eachindex(mm)
+    mmI = mm[I]
+    @test_approx_eq mmI.num val.num
+    @test_approx_eq mmI.denom val.denom
+end
+
 
 RMlist = (RegisterMismatch,)
 mdutils = nothing
@@ -86,7 +101,7 @@ nd = RegisterMismatch.mismatch0(C, D, normalization=:pixels)
 @test_approx_eq mm[0,0].num nd.num
 @test_approx_eq mm[0,0].denom nd.denom
 
-mms = RegisterMismatch.mismatch_apertures(C, D, (2,2), (3,2))
+mms = RegisterMismatch.mismatch_apertures(C, D, (2,2), (3,2), normalization=:intensity)
 nd0 = RegisterMismatch.mismatch0(C, D)
 nd1 = RegisterMismatch.mismatch0(mms)
 @test_approx_eq nd0.num nd1.num
@@ -103,7 +118,7 @@ for imsz in ((15,16), (14,17))
             Bpad = Images.padarray(rand(1:20, imsz[1], imsz[2]), maxshift, maxshift, "value", 0)
             for RM in RMlist
                 # intensity normalization
-                mms = RM.mismatch_apertures(Float64, Apad, Bpad, gridsize, maxshift, display=false)
+                mms = RM.mismatch_apertures(Float64, Apad, Bpad, gridsize, maxshift, normalization=:intensity, display=false)
                 nums, denoms = RegisterCore.separate(mms)
                 num = sum(nums)
                 denom = sum(denoms)
@@ -143,7 +158,7 @@ for RM in RMlist
     @test_approx_eq_eps mmref.data num.data accuracy*nrm
     @test_approx_eq_eps fill(nrm,size(denom)) denom.data accuracy*nrm
 
-    mms = RM.mismatch_apertures(Apad, Bpad, (2,3,2),[4,3,2], display=false)
+    mms = RM.mismatch_apertures(Apad, Bpad, (2,3,2),[4,3,2], normalization=:intensity, display=false)
     nums, denoms = RegisterCore.separate(mms)
     num = sum(nums)
     denom = sum(denoms)
