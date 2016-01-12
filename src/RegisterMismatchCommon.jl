@@ -173,10 +173,17 @@ positions specified along the first dimension.  (But you may find the
 function allocate_mmarrays{T,C<:Union{AbstractVector,Tuple}}(::Type{T}, aperture_centers::AbstractArray{C}, maxshift)
     isempty(aperture_centers) && error("aperture_centers is empty")
     N = length(first(aperture_centers))
-    mms = Array(MismatchArray{NumDenom{T},N}, size(aperture_centers))
     sz = map(x->2*x+1, maxshift)
+    mm = MismatchArray(T, sz...)
+    mms = Array(typeof(mm), size(aperture_centers))
+    f = true
     for i in eachindex(mms)
-        mms[i] = MismatchArray(T, sz...)
+        if f
+            mms[i] = mm
+            f = false
+        else
+            mms[i] = MismatchArray(T, sz...)
+        end
     end
     mms
 end
