@@ -25,39 +25,30 @@ end
 data with imputed data.  If each pixel in your camera has a different
 bias, then matching that bias becomes an incentive to avoid
 shifts.  Likewise, CMOS cameras tend to have correlated row/column
-noise. These two factors combine to imply that `mm[i,j]` is unreliable
+noise. These two factors combine to imply that `mm[i,j,...]` is unreliable
 whenever `i` or `j` is zero.
 
 Data are imputed by averaging the adjacent non-suspect values.  This
 function works in-place, overwriting the original `mm`.
 """
-function correctbias!{ND,N}(mm::MismatchArray{ND,N})
+function correctbias!{ND,N}(mm::MismatchArray{ND,N}, w = correctbias_weight(mm))
     T = eltype(ND)
-    w = CenterIndexedArray(ones(T, size(mm)))
+    mxshift = maxshift(mm)
+    Imax = CartesianIndex(mxshift)
+    Imin = CartesianIndex(map(x->-x,mxshift)::NTuple{N,Int})
+    I1 = CartesianIndex(ntuple(d->d>2?0:1, N)::NTuple{N,Int})  # only first 2 dims
     for I in eachindex(mm)
-        anyzero = false
-        for d = 1:N
-            anyzero |= I[d] == 0
-        end
-        if anyzero
-            w[I] = 0
-            mm[I] = NumDenom{T}(0,0)
-        end
-    end
-    mmd = copy(mm.data)  # make a copy so updates don't affect later operations
-    wd = w.data
-    I1 = CartesianIndex(ntuple(d->1, N)::NTuple{N,Int})
-    Iend = CartesianIndex(ntuple(d->size(mm,d), N)::NTuple{N,Int})
-    for I in CartesianRange(size(mmd))
-        if wd[I] == 0
+        if w[I] == 0
             mms = NumDenom{T}(0,0)
             ws = zero(T)
-            CR = CartesianRange(max(I1, I-I1), min(Iend, I+I1))
-            for J in CR
-                mms += mmd[J]
-                ws += wd[J]
+            for J in CartesianRange(max(Imin, I-I1), min(Imax, I+I1))
+                wJ = w[J]
+                if wJ != 0
+                    mms += wJ*mm[J]
+                    ws += wJ
+                end
             end
-            mm.data[I] = mms/ws
+            mm[I] = mms/ws
         end
     end
     mm
@@ -69,6 +60,21 @@ function correctbias!{M<:MismatchArray}(mms::AbstractArray{M})
         correctbias!(mm)
     end
     mms
+end
+
+function correctbias_weight{ND,N}(mm::MismatchArray{ND,N})
+    T = eltype(ND)
+    w = CenterIndexedArray(ones(T, size(mm)))
+    for I in eachindex(mm)
+        anyzero = false
+        for d = 1:min(N,2)   # only first 2 dims
+            anyzero |= I[d] == 0
+        end
+        if anyzero
+            w[I] = 0
+        end
+    end
+    w
 end
 
 """

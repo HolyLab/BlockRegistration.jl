@@ -19,19 +19,34 @@ end
 @test RegisterMismatch.aperture_range((15,), (7,)) == (12:18,)
 
 # Bias correction
-mma = fill(NumDenom(2.0,0.5), 3, 3)
+val = NumDenom(2.0,0.5)
+# 2d
+mma = fill(val, 3, 3)
 for i = 1:3
     mma[2,i] = NumDenom(rand(),rand())
     mma[i,2] = NumDenom(rand(),rand())
 end
 mm = CenterIndexedArray(mma)
 RegisterMismatch.correctbias!(mm)
-mm1 = mm[0,0]
 for I in eachindex(mm)
     mmI = mm[I]
-    @test_approx_eq mmI.num mm1.num
-    @test_approx_eq mmI.denom mm1.denom
+    @test_approx_eq mmI.num val.num
+    @test_approx_eq mmI.denom val.denom
 end
+# 3d
+mma = fill(val, 3, 3, 3)
+for i = 1:3, j = 1:3
+    mma[2,i,j] = NumDenom(rand(),rand())
+    mma[i,2,j] = NumDenom(rand(),rand())
+end
+mm = CenterIndexedArray(mma)
+RegisterMismatch.correctbias!(mm)
+for I in eachindex(mm)
+    mmI = mm[I]
+    @test_approx_eq mmI.num val.num
+    @test_approx_eq mmI.denom val.denom
+end
+
 
 RMlist = (RegisterMismatch,)
 mdutils = nothing
