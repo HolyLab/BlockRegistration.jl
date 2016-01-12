@@ -101,7 +101,7 @@ nd = RegisterMismatch.mismatch0(C, D, normalization=:pixels)
 @test_approx_eq mm[0,0].num nd.num
 @test_approx_eq mm[0,0].denom nd.denom
 
-mms = RegisterMismatch.mismatch_apertures(C, D, (2,2), (3,2))
+mms = RegisterMismatch.mismatch_apertures(C, D, (2,2), (3,2), normalization=:intensity)
 nd0 = RegisterMismatch.mismatch0(C, D)
 nd1 = RegisterMismatch.mismatch0(mms)
 @test_approx_eq nd0.num nd1.num
@@ -118,7 +118,7 @@ for imsz in ((15,16), (14,17))
             Bpad = Images.padarray(rand(1:20, imsz[1], imsz[2]), maxshift, maxshift, "value", 0)
             for RM in RMlist
                 # intensity normalization
-                mms = RM.mismatch_apertures(Float64, Apad, Bpad, gridsize, maxshift, display=false)
+                mms = RM.mismatch_apertures(Float64, Apad, Bpad, gridsize, maxshift, normalization=:intensity, display=false)
                 nums, denoms = RegisterCore.separate(mms)
                 num = sum(nums)
                 denom = sum(denoms)
@@ -158,7 +158,7 @@ for RM in RMlist
     @test_approx_eq_eps mmref.data num.data accuracy*nrm
     @test_approx_eq_eps fill(nrm,size(denom)) denom.data accuracy*nrm
 
-    mms = RM.mismatch_apertures(Apad, Bpad, (2,3,2),[4,3,2], display=false)
+    mms = RM.mismatch_apertures(Apad, Bpad, (2,3,2),[4,3,2], normalization=:intensity, display=false)
     nums, denoms = RegisterCore.separate(mms)
     num = sum(nums)
     denom = sum(denoms)

@@ -177,7 +177,7 @@ end
 
 """
 `mms = mismatch_apertures([T], fixed, moving, gridsize, maxshift;
-[normalization=:intensity], [flags=FFTW.MEASURE], kwargs...)` computes
+[normalization=:pixels], [flags=FFTW.MEASURE], kwargs...)` computes
 the mismatch between `fixed` and `moving` over a regularly-spaced grid
 of aperture centers, effectively breaking the images up into
 chunks. The maximum-allowed shift in any aperture is `maxshift`.
@@ -223,7 +223,7 @@ function mismatch_apertures{T}(fixed::AbstractCudaArray{T},
                                aperture_centers::AbstractArray,
                                aperture_width::WidthLike,
                                maxshift::DimsLike;
-                               normalization = :intensity,
+                               normalization = :pixels,
                                kwargs...)
     nd = sdims(fixed)
     assertsamesize(fixed,moving)
@@ -330,14 +330,14 @@ end
 
 """
 `mismatch_apertures!(mms, fixed, moving, aperture_centers, cms;
-[normalization=:intensity])` computes the mismatch between `fixed` and
+[normalization=:pixels])` computes the mismatch between `fixed` and
 `moving` over a list of apertures at positions defined by
 `aperture_centers`.  The parameters and working storage are contained
 in `cms`, a `CMStorage` object. The results are stored in `mms`, an
 Array-of-MismatchArrays which must have length equal to the number of
 aperture centers.
 """
-function mismatch_apertures!(mms, fixed, moving, aperture_centers, cms; normalization=:intensity)
+function mismatch_apertures!(mms, fixed, moving, aperture_centers, cms; normalization=:pixels)
     assertsamesize(fixed, moving)
     N = ndims(cms)
     for (mm,center) in zip(mms, each_point(aperture_centers))
