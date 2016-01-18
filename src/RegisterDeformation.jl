@@ -16,6 +16,7 @@ export
     arraysize,
     compose,
     eachknot,
+    griddeformations,
     tform2deformation,
     tinterpolate,
     translate,
@@ -151,6 +152,27 @@ function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV})
     ndims(u) == N || throw(DimensionMismatch("Dimension $(ndims(u)) incompatible with vectors of length $N"))
     GridDeformation{eltype(FV),N,typeof(u),typeof(u.ranges[1])}(u)
 end
+
+"""
+`ϕs = griddeformations(u, knots)` constructs a vector `ϕs` of
+seqeuential deformations.  The last dimension of the array `u` should
+correspond to time; `ϕs[i]` is produced from `u[..., i]`.
+"""
+function griddeformations{N,T<:Number}(u::AbstractArray{T}, knots::NTuple{N})
+    ndims(u) == N+2 || error("Need $(N+2) dimensions for a vector of $N-dimensional deformations")
+    size(u,1) == N || error("First dimension of u must be of length $N")
+    uf = RegisterDeformation.convert_to_fixed(Vec{N,T}, u, Base.tail(size(u)))
+    griddeformations(uf, knots)
+end
+
+function griddeformations{N,FV<:FixedVector}(u::AbstractArray{FV}, knots::NTuple{N})
+    ndims(u) == N+1 || error("Need $(N+1) dimensions for a vector of $N-dimensional deformations")
+    length(FV) == N || throw(DimensionMismatch("Dimensionality $(length(FV)) must match $N knot vectors"))
+    colons = ntuple(d->Colon(), N)::NTuple{N,Colon}
+    [GridDeformation(slice(u, colons..., i), knots) for i = 1:size(u, N+1)]
+end
+
+Base.copy{T,N,A,L}(ϕ::GridDeformation{T,N,A,L}) = (u = copy(ϕ.u); GridDeformation{T,N,typeof(u),L}(u, copy(ϕ.knots)))
 
 # # TODO: flesh this out
 # immutable VoroiDeformation{T,N,Vu<:AbstractVector,Vc<:AbstractVector} <: AbstractDeformation{T,N}
