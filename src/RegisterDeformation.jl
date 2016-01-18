@@ -17,6 +17,7 @@ export
     compose,
     eachknot,
     griddeformations,
+    medfilt,
     tform2deformation,
     tinterpolate,
     translate,
@@ -316,6 +317,49 @@ end
 function compose{T,N}(f::Function, ϕ_new::GridDeformation{T,N})
     f == identity || error("Only the identity function is supported")
     ϕ_new, fill(eye(Mat{N,N,T}), size(ϕ_new.u))
+end
+
+function medfilt{D<:AbstractDeformation}(ϕs::AbstractVector{D}, n)
+    nhalf = n>>1
+    2nhalf+1 == n || error("filter size must be odd")
+    T = eltype(eltype(D))
+    v = Array(T, ndims(D), n)
+    vs = ntuple(d->slice(v, d, :), ndims(D))
+    ϕ1 = copy(ϕs[1])
+    ϕout = Array(typeof(ϕ1), length(ϕs))
+    ϕout[1] = ϕ1
+    _medfilt!(ϕout, ϕs, v, vs)  # function barrier due to instability of vs
+end
+
+@noinline function _medfilt!{N,T}(ϕout, ϕs, v, vs::NTuple{N,T})
+    n = size(v,2)
+    nhalf = n>>1
+    tmp = Array(eltype(T), N)
+    u1 = ϕout[1].u
+    for i = 1+nhalf:length(ϕs)-nhalf
+        u = similar(u1)
+        for I in eachindex(ϕs[i].u)
+            for j = -nhalf:nhalf
+                utmp = ϕs[i+j].u[I]
+                for d = 1:N
+                    v[d, j+nhalf+1] = utmp[d]
+                end
+            end
+            for d = 1:N
+                tmp[d] = median!(vs[d])
+            end
+            u[I] = tmp
+        end
+        ϕout[i] = GridDeformation(u, ϕs[i].knots)
+    end
+    # Copy the beginning and end
+    for i = 2:nhalf  # we did [1] in medfilt
+        ϕout[i] = copy(ϕs[i])
+    end
+    for i = length(ϕs)-nhalf+1:length(ϕs)
+        ϕout[i] = copy(ϕs[i])
+    end
+    ϕout
 end
 
 ### WarpedArray

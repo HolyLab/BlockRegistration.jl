@@ -297,3 +297,12 @@ knots = (linspace(1,20,2),)
 @test eltype(ϕs) == eltype(ϕsindex)
 @test all(ϕs[1].u .== Vec(1.0))
 @test all(ϕs[3].u .== Vec(2.0))
+
+# median filtering
+u = rand(2, 3, 3, 9)
+ϕs = RegisterDeformation.griddeformations(u, (linspace(1,10,3), linspace(1,11,3)))
+ϕsfilt = RegisterDeformation.medfilt(ϕs, 3)
+v = ϕsfilt[3].u[2,2]
+v1 = median(vec(u[1,2,2,2:4]))
+v2 = median(vec(u[2,2,2,2:4]))
+@test v[1] == v1 && v[2] == v2
