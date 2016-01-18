@@ -60,11 +60,6 @@ MathProgBase.jac_structure(::BoundsOnly) = Int[], Int[]
 MathProgBase.eval_jac_g(::BoundsOnly, J, x) = nothing
 
 
-# Some necessary ForwardDiff extensions to make Interpolations work
-Base.real(v::ForwardDiff.GradientNumber) = real(v.value)
-Base.ceil(::Type{Int}, v::ForwardDiff.GradientNumber)  = ceil(Int, v.value)
-Base.floor(::Type{Int}, v::ForwardDiff.GradientNumber) = floor(Int, v.value)
-
 ###
 ### Rigid registration from raw images
 ###

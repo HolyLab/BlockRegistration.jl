@@ -204,7 +204,6 @@ imsz = (100,101)
 for f in (interpolate, identity)
     ϕ2 = f(RegisterDeformation.GridDeformation(u2, imsz))
     ϕ, g = RegisterDeformation.compose(ϕ1, ϕ2)
-    Base.real(x::ForwardDiff.GradientNumber) = x.value
     u2vec = vec(u2)
     j = ForwardDiff.jacobian(u2vec -> compose_u(ϕ1, u2vec, f, size(u2), imsz))
     gj = j(u2vec)
