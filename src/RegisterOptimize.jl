@@ -616,7 +616,7 @@ function fixed_λ{T,N,_}(cs::AbstractArray{Vec{N,T}}, Qs::AbstractArray{Mat{N,N,
 end
 
 # This version re-packs variables as read from the .jld file
-function fixed_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mmis::Array{Tf}; mu_init=0.1, kwargs...)
+function fixed_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mmis::Array{Tf}; kwargs...)
     csr = reinterpret(Vec{N,Tf}, cs, tail(size(cs)))
     Qsr = reinterpret(Mat{N,N,Tf}, Qs, tail(tail(size(Qs))))
     if length(mmis) > 10^7
@@ -626,15 +626,14 @@ function fixed_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}
     ND = NumDenom{Tf}
     mmisr = reinterpret(ND, mmis, tail(size(mmis)))
     mmisc = cachedinterpolators(mmisr, N, ntuple(d->(size(mmisr,d)+1)>>1, N))
-    fixed_λ(csr, Qsr, knots, ap, λt, mmisc; mu_init=mu_init, kwargs...)
+    fixed_λ(csr, Qsr, knots, ap, λt, mmisc; kwargs...)
 end
 
 ###
 ### Set λ automatically
 ###
 """
-`ϕ, penalty, λ, datapenalty, quality = auto_λ(cs, Qs, knots,
-mmis, (λmin, λmax))` automatically chooses "the best"
+`ϕ, penalty, λ, datapenalty, quality = auto_λ(fixed, moving, gridsize, maxshift, (λmin, λmax))` automatically chooses "the best"
 value of `λ` to serve in the spatial regularization penalty. It tests a
 sequence of `λ` values, starting with `λmin` and each successive value
 two-fold larger than the previous; for each such `λ`, it optimizes the
@@ -645,9 +644,11 @@ initial upslope of the sigmoid (indicating that the penalty is large
 enough to begin limiting the form of the deformation, but not yet to
 substantially decrease the quality of the registration).
 
-`cs` and `Qs` come from `qfit`, `knots` specifies the deformation
-grid, and `mmis` is the array-of-mismatch arrays (already
-interpolating, see `interpolate_mm!`).
+`ϕ, penalty, λ, datapenalty, quality = auto_λ(cs, Qs, knots, mmis,
+(λmin, λmax))` is used if you've already computed mismatch data. `cs`
+and `Qs` come from `qfit`, `knots` specifies the deformation grid, and
+`mmis` is the array-of-mismatch arrays (already interpolating, see
+`interpolate_mm!`).
 
 As a first pass, try setting `λmin=1e-6` and `λmax=100`. You can plot
 the returned `datapenalty` and check that it is approximately
@@ -666,6 +667,25 @@ knots, mmis, (λmin, λmax))` will perform the analysis on the chosen
 See also: `fixed_λ`. Because `auto_λ` performs the optimization
 repeatedly for many different `λ`s, it is slower than `fixed_λ`.
 """
+function auto_λ{R<:Real,S<:Real,N}(fixed::AbstractArray{R}, moving::AbstractArray{S}, gridsize::NTuple{N}, maxshift::NTuple{N}, λrange; thresh=(0.5)^ndims(fixed)*length(fixed)/prod(gridsize))
+    T = Float64
+    local mms
+    try
+        mms = Main.mismatch_apertures(T, fixed, moving, gridsize, maxshift; normalization=:pixels)
+    catch
+        warn("call to mismatch_apertures failed. Make sure you're using either RegisterMismatch or RegisterMismatchCuda")
+        rethrow()
+    end
+    cs = Array(Vec{N,T}, gridsize)
+    Qs = Array(Mat{N,N,T}, gridsize)
+    for i = 1:length(mms)
+        _, cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)
+    end
+    mmis = interpolate_mm!(mms)
+    knots = map(d->linspace(1,size(fixed,d),gridsize[d]), (1:ndims(fixed)...))::NTuple{N, LinSpace{Float64}}
+    auto_λ(cs, Qs, knots, mmis, λrange)
+end
+
 function auto_λ{N}(cs, Qs, knots::NTuple{N}, mmis, λrange)
     ap = AffinePenalty{Float64,N}(knots, λrange[1])  # default to affine-residual penalty, Ipopt needs Float64
     auto_λ(cs, Qs, knots, ap, mmis, λrange)
