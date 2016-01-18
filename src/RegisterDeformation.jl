@@ -687,7 +687,7 @@ function convert_to_fixed{T}(u::Array{T}, sz=size(u))
 end
 
 # Unlike the one above, this is type-stable
-function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u, sz=tail(size(u)))
+function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u::AbstractArray{T}, sz=tail(size(u)))
     if isbits(T)
         uf = reinterpret(Vec{N,T}, u, sz)
     else
