@@ -49,6 +49,12 @@ handle on the basic underpinnings).
 Also consider looking at the code in `test` as an example of how to
 use these modules.
 
+## Stack-by-stack optimization
+
+See the "stack-by-stack registration" section of
+`BlockRegistrationScheduler`.  If you're using this mode, many parts
+of the rest of this README do not apply.
+
 ## Whole-experiment optimization
 
 In general you'll use this in conjunction with

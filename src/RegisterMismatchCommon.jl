@@ -270,7 +270,7 @@ function default_aperture_width(img, gridsize::DimsLike, overlap::DimsLike = zer
     length(sc) == length(gridsize) == length(overlap) || error("gridsize and overlap must have length equal to the number of spatial dimensions in img")
     for i = 1:length(sc)
         if gridsize[i] > size(img, sc[i])
-            error("gridsize is too large, given the size of the image")
+            error("gridsize $gridsize is too large, given the size $(size(img)[sc]) of the image")
         end
     end
     gsz1 = max(1,[gridsize...].-1)

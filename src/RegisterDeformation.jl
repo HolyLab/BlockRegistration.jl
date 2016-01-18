@@ -16,6 +16,8 @@ export
     arraysize,
     compose,
     eachknot,
+    griddeformations,
+    medfilt,
     tform2deformation,
     tinterpolate,
     translate,
@@ -151,6 +153,27 @@ function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV})
     ndims(u) == N || throw(DimensionMismatch("Dimension $(ndims(u)) incompatible with vectors of length $N"))
     GridDeformation{eltype(FV),N,typeof(u),typeof(u.ranges[1])}(u)
 end
+
+"""
+`ϕs = griddeformations(u, knots)` constructs a vector `ϕs` of
+seqeuential deformations.  The last dimension of the array `u` should
+correspond to time; `ϕs[i]` is produced from `u[..., i]`.
+"""
+function griddeformations{N,T<:Number}(u::AbstractArray{T}, knots::NTuple{N})
+    ndims(u) == N+2 || error("Need $(N+2) dimensions for a vector of $N-dimensional deformations")
+    size(u,1) == N || error("First dimension of u must be of length $N")
+    uf = RegisterDeformation.convert_to_fixed(Vec{N,T}, u, Base.tail(size(u)))
+    griddeformations(uf, knots)
+end
+
+function griddeformations{N,FV<:FixedVector}(u::AbstractArray{FV}, knots::NTuple{N})
+    ndims(u) == N+1 || error("Need $(N+1) dimensions for a vector of $N-dimensional deformations")
+    length(FV) == N || throw(DimensionMismatch("Dimensionality $(length(FV)) must match $N knot vectors"))
+    colons = ntuple(d->Colon(), N)::NTuple{N,Colon}
+    [GridDeformation(slice(u, colons..., i), knots) for i = 1:size(u, N+1)]
+end
+
+Base.copy{T,N,A,L}(ϕ::GridDeformation{T,N,A,L}) = (u = copy(ϕ.u); GridDeformation{T,N,typeof(u),L}(u, copy(ϕ.knots)))
 
 # # TODO: flesh this out
 # immutable VoroiDeformation{T,N,Vu<:AbstractVector,Vc<:AbstractVector} <: AbstractDeformation{T,N}
@@ -294,6 +317,49 @@ end
 function compose{T,N}(f::Function, ϕ_new::GridDeformation{T,N})
     f == identity || error("Only the identity function is supported")
     ϕ_new, fill(eye(Mat{N,N,T}), size(ϕ_new.u))
+end
+
+function medfilt{D<:AbstractDeformation}(ϕs::AbstractVector{D}, n)
+    nhalf = n>>1
+    2nhalf+1 == n || error("filter size must be odd")
+    T = eltype(eltype(D))
+    v = Array(T, ndims(D), n)
+    vs = ntuple(d->slice(v, d, :), ndims(D))
+    ϕ1 = copy(ϕs[1])
+    ϕout = Array(typeof(ϕ1), length(ϕs))
+    ϕout[1] = ϕ1
+    _medfilt!(ϕout, ϕs, v, vs)  # function barrier due to instability of vs
+end
+
+@noinline function _medfilt!{N,T}(ϕout, ϕs, v, vs::NTuple{N,T})
+    n = size(v,2)
+    nhalf = n>>1
+    tmp = Array(eltype(T), N)
+    u1 = ϕout[1].u
+    for i = 1+nhalf:length(ϕs)-nhalf
+        u = similar(u1)
+        for I in eachindex(ϕs[i].u)
+            for j = -nhalf:nhalf
+                utmp = ϕs[i+j].u[I]
+                for d = 1:N
+                    v[d, j+nhalf+1] = utmp[d]
+                end
+            end
+            for d = 1:N
+                tmp[d] = median!(vs[d])
+            end
+            u[I] = tmp
+        end
+        ϕout[i] = GridDeformation(u, ϕs[i].knots)
+    end
+    # Copy the beginning and end
+    for i = 2:nhalf  # we did [1] in medfilt
+        ϕout[i] = copy(ϕs[i])
+    end
+    for i = length(ϕs)-nhalf+1:length(ϕs)
+        ϕout[i] = copy(ϕs[i])
+    end
+    ϕout
 end
 
 ### WarpedArray
@@ -687,7 +753,7 @@ function convert_to_fixed{T}(u::Array{T}, sz=size(u))
 end
 
 # Unlike the one above, this is type-stable
-function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u, sz=tail(size(u)))
+function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u::AbstractArray{T}, sz=tail(size(u)))
     if isbits(T)
         uf = reinterpret(Vec{N,T}, u, sz)
     else
