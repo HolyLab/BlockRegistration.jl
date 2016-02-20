@@ -662,7 +662,7 @@ knots, mmis, (λmin, λmax))` will perform the analysis on the chosen
 See also: `fixed_λ`. Because `auto_λ` performs the optimization
 repeatedly for many different `λ`s, it is slower than `fixed_λ`.
 """
-function auto_λ{R<:Real,S<:Real,N}(fixed::AbstractArray{R}, moving::AbstractArray{S}, gridsize::NTuple{N}, maxshift::NTuple{N}, λrange; thresh=(0.5)^ndims(fixed)*length(fixed)/prod(gridsize))
+function auto_λ{R<:Real,S<:Real,N}(fixed::AbstractArray{R}, moving::AbstractArray{S}, gridsize::NTuple{N}, maxshift::NTuple{N}, λrange; thresh=(0.5)^ndims(fixed)*length(fixed)/prod(gridsize), kwargs...)
     T = Float64
     local mms
     try
@@ -671,43 +671,38 @@ function auto_λ{R<:Real,S<:Real,N}(fixed::AbstractArray{R}, moving::AbstractArr
         warn("call to mismatch_apertures failed. Make sure you're using either RegisterMismatch or RegisterMismatchCuda")
         rethrow()
     end
-    cs = Array(Vec{N,T}, gridsize)
-    Qs = Array(Mat{N,N,T}, gridsize)
-    for i = 1:length(mms)
-        _, cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)
-    end
-    mmis = interpolate_mm!(mms)
+    cs, Qs, mmis = mms2fit(mms, thresh)
     knots = map(d->linspace(1,size(fixed,d),gridsize[d]), (1:ndims(fixed)...))::NTuple{N, LinSpace{Float64}}
-    auto_λ(cs, Qs, knots, mmis, λrange)
+    auto_λ(cs, Qs, knots, mmis, λrange; kwargs...)
 end
 
-function auto_λ{N}(cs, Qs, knots::NTuple{N}, mmis, λrange)
+function auto_λ{N}(cs, Qs, knots::NTuple{N}, mmis, λrange; kwargs...)
     ap = AffinePenalty{Float64,N}(knots, λrange[1])  # default to affine-residual penalty, Ipopt needs Float64
-    auto_λ(cs, Qs, knots, ap, mmis, λrange)
+    auto_λ(cs, Qs, knots, ap, mmis, λrange; kwargs...)
 end
 
-function auto_λ{N}(stackidx::Integer, cs, Qs, knots::NTuple{N}, mmis, λrange)
+function auto_λ{N}(stackidx::Integer, cs, Qs, knots::NTuple{N}, mmis, λrange; kwargs...)
     cs1 = cs[ntuple(d->Colon(),ndims(cs)-1)..., stackidx];
     Qs1 = Qs[ntuple(d->Colon(),ndims(Qs)-1)..., stackidx];
     mmis1 = mmis[ntuple(d->Colon(),ndims(mmis)-1)..., stackidx];
-    auto_λ(cs1, Qs1, knots, mmis1, λrange)
+    auto_λ(cs1, Qs1, knots, mmis1, λrange; kwargs...)
 end
 
-function auto_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis::Array{Tf}, λrange)
+function auto_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis::Array{Tf}, λrange; kwargs...)
     # Ipopt requires Float64
-    auto_λ(convert(Array{Float64}, cs), convert(Array{Float64}, Qs), knots, ap, convert(Array{Float64}, mmis), λrange)
+    auto_λ(convert(Array{Float64}, cs), convert(Array{Float64}, Qs), knots, ap, convert(Array{Float64}, mmis), λrange; kwargs...)
 end
 
-function auto_λ{T,N}(cs::Array{Float64}, Qs::Array{Float64}, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis::Array{Float64}, λrange)
+function auto_λ{T,N}(cs::Array{Float64}, Qs::Array{Float64}, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis::Array{Float64}, λrange; kwargs...)
     csr = reinterpret(Vec{N,Float64}, cs, tail(size(cs)))
     Qsr = reinterpret(Mat{N,N,Float64}, Qs, tail(tail(size(Qs))))
     mmisr = reinterpret(NumDenom{Float64}, mmis, tail(size(mmis)))
     mmisc = cachedinterpolators(mmisr, N, ntuple(d->(size(mmisr,d)+1)>>1, N))
     ap64 = convert(AffinePenalty{Float64,N}, ap)
-    auto_λ(csr, Qsr, knots, ap64, mmisc, λrange)
+    auto_λ(csr, Qsr, knots, ap64, mmisc, λrange; kwargs...)
 end
 
-function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λrange)
+function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λrange; kwargs...)
     λmin, λmax = λrange
     gridsize = map(length, knots)
     uc = zeros(T, N, gridsize...)
@@ -717,7 +712,7 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     function optimizer!(x, mu_init)
         local pnew
         while mu_init > 1e-16
-            x, pnew, p0 = optimize!(x, identity, ap, mmis, mu_strategy="monotone", mu_init=mu_init)
+            x, pnew, p0 = optimize!(x, identity, ap, mmis; mu_strategy="monotone", mu_init=mu_init, kwargs...)
             pnew <= p0 && break
             mu_init /= 10
         end
