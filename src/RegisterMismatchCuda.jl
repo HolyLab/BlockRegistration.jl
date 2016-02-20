@@ -8,6 +8,9 @@ import Base: close, eltype, ndims
 import CUDArt: free, device, pitchedptr
 import Images: sdims, coords_spatial, data
 
+Base.convert{T,n,S}(::Type{Array{T}}, x::AbstractArray{S,n}) = convert(Array{T,n}, x)
+Base.convert{T,n,S}(::Type{Array{T,n}}, x::AbstractArray{S,n}) = copy!(Array{T}(size(x)...), x)
+
 export
     CMStorage,
     fillfixed!,
