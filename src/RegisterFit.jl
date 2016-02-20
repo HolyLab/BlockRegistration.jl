@@ -9,6 +9,7 @@ using Base: @nloops, @nexprs, @nref, @nif
 
 export
     mismatch2affine,
+    mms2fit!,
     optimize_per_aperture,
     pat_rotation,
     principalaxes,
@@ -33,6 +34,7 @@ into categories:
 ### Utilities
 
 - `qfit`: fit a single aperture's mismatch data to a quadratic form
+- `mms2fit!`: prepare an array-of-mismatcharrays for optimization
 - `qbuild`: reconstruct mismatch data from a quadratic form
 - `uclamp!` and `uisvalid!`: check/enforce bounds on optimization
 
@@ -441,6 +443,26 @@ function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
     end
     unpackL!(QL, results.zero)
     E0, uout, QL'*QL
+end
+
+"""
+`cs, Qs, mmis = mms2fit!(mms, thresh)` computes the shift and
+quadratic-fit values for the array-of-mismatcharrays `mms`, using a
+threshold of `thresh`. It also prepares `mms` for interpolation,
+modifying the data in-place (after computing `cs` and `Qs`).
+
+The return values are suited for input the `fixed_λ` and `auto_λ`.
+"""
+function mms2fit!{A<:MismatchArray,N}(mms::AbstractArray{A,N}, thresh)
+    T = eltype(eltype(A))
+    gridsize = size(mms)
+    cs = Array(Vec{N,T}, gridsize)
+    Qs = Array(Mat{N,N,T}, gridsize)
+    for i = 1:length(mms)
+        _, cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)
+    end
+    mmis = interpolate_mm!(mms)
+    cs, Qs, mmis
 end
 
 function unpackL!(QL, x)
