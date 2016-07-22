@@ -669,16 +669,17 @@ function warpgrid(ϕ; scale=1, showidentity::Bool=false)
 end
 
 """
-`ϕs = tinterpolate(ϕsindex, tindex, nstack)` uses linear
-interpolation/extrapolation in time to "fill out" to times `1:nstack`
+`ϕs = tinterpolate(ϕsindex, tindex, stackrange)` uses linear
+interpolation/extrapolation in time to "fill out" to times `stackrange`
 a deformation defined intermediate times `tindex` . Note that
 `ϕs[tindex] == ϕsindex`.
 """
-function tinterpolate(ϕsindex, tindex, nstack)
+function tinterpolate(ϕsindex, tindex, stackrange)
+    nstack = length(stackrange)
     ϕs = Array(eltype(ϕsindex), nstack)
     # Before the first tindex
     k = 0
-    for i in 1:tindex[1]-1
+    for i in stackrange[1]:tindex[1]
         ϕs[k+=1] = ϕsindex[1]
     end
     # Within tindex
@@ -692,8 +693,10 @@ function tinterpolate(ϕsindex, tindex, nstack)
         end
     end
     # After the last tindex
-    for i in tindex[end]:nstack
-        ϕs[k+=1] = ϕsindex[end]
+    if stackrange[end] > tindex[end]
+        for i in tindex[end]:stackrange[end]
+            ϕs[k+=1] = ϕsindex[end]
+        end
     end
     return ϕs
 end
