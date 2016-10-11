@@ -1,7 +1,7 @@
 Images
 Interpolations
 AffineTransforms 0.1.3
-FixedSizeArrays
+FixedSizeArrays 0.2.2
 NLsolve
 MathProgBase 0.4
 Ipopt
@@ -11,5 +11,5 @@ CUFFT
 HDF5
 JLD
 Reexport
-ForwardDiff
+ForwardDiff 0.2.0
 ProgressMeter

@@ -790,7 +790,7 @@ end
 
 # Note this is a bit unsafe as it requires the user to specify C correctly
 @generated function Base.convert{R,C,T}(::Type{Mat{R,C,T}}, v::Vector{Vec{R,T}})
-    args = [:(v[$d]._) for d = 1:C]
+    args = [:(Tuple(v[$d])) for d = 1:C]
     :(Mat{R,C,T}(($(args...),)))
 end
 

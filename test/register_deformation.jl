@@ -205,8 +205,7 @@ for f in (interpolate, identity)
     ϕ2 = f(RegisterDeformation.GridDeformation(u2, imsz))
     ϕ, g = RegisterDeformation.compose(ϕ1, ϕ2)
     u2vec = vec(u2)
-    j = ForwardDiff.jacobian(u2vec -> compose_u(ϕ1, u2vec, f, size(u2), imsz))
-    gj = j(u2vec)
+    gj = ForwardDiff.jacobian(u2vec -> compose_u(ϕ1, u2vec, f, size(u2), imsz), u2vec)
     compare_g(g, gj, gridsize)
 end
 

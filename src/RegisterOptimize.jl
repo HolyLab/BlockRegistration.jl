@@ -163,7 +163,7 @@ end
 
 function RigidOpt(fixed, moving, SD, thresh)
     rv = RigidValue(fixed, moving, SD, thresh)
-    g = ForwardDiff.gradient(rv)
+    g = x->ForwardDiff.gradient(rv, x)
     RigidOpt(rv, g)
 end
 
@@ -1006,7 +1006,7 @@ type SigmoidOpt{G,H} <: BoundsOnly
     h::H
 end
 
-SigmoidOpt(data::Vector{Float64}) = SigmoidOpt(data, ForwardDiff.gradient(x->sigpenalty(x, data)), ForwardDiff.hessian(x->sigpenalty(x, data)))
+SigmoidOpt(data::Vector{Float64}) = SigmoidOpt(data, y->ForwardDiff.gradient(x->sigpenalty(x, data), y), y->ForwardDiff.hessian(x->sigpenalty(x, data), y))
 
 function MathProgBase.initialize(d::SigmoidOpt, requested_features::Vector{Symbol})
     for feat in requested_features
