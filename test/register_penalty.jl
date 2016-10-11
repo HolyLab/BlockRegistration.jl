@@ -229,8 +229,8 @@ cnvt = x->RegisterPenalty.vec2ϕs(x, gsize, n, knots)
 ϕs = cnvt(x)
 g = similar(x)
 val = RegisterPenalty.penalty!(g, 1.0, ϕs)
-gfunc = ForwardDiff.gradient(x->RegisterPenalty.penalty(1.0, cnvt(x)))
-@test_approx_eq vec(g) gfunc(x)
+gfx = ForwardDiff.gradient(x->RegisterPenalty.penalty(1.0, cnvt(x)), x)
+@test_approx_eq vec(g) gfx
 
 ### Total penalty, with a temporal penalty
 Qs = cat(3, eye(2,2), zeros(2,2), eye(2,2))
@@ -258,6 +258,5 @@ function similarϕ{Tϕ,N,A,L,Tx}(ϕs::Vector{GridDeformation{Tϕ,N,A,L}}, x::Arr
     colons = ntuple(i->Colon(), N)::NTuple{N,Colon}
     [GridDeformation(xf[colons..., i], ϕs[i].knots) for i = 1:length(ϕs)]
 end
-tgrad = ForwardDiff.gradient(x->pfun(x, ϕs, ap, λt, mmis))
-gcmp = tgrad(vec(u))
+gcmp = ForwardDiff.gradient(x->pfun(x, ϕs, ap, λt, mmis), vec(u))
 @test_approx_eq vec(g) gcmp

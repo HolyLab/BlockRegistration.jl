@@ -11,5 +11,5 @@ CUFFT
 HDF5
 JLD
 Reexport
-ForwardDiff
+ForwardDiff 0.2.0
 ProgressMeter
