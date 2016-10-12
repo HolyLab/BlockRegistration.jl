@@ -420,7 +420,11 @@ function getindex_impl(N)
     end
 end
 
-getindex!(dest, W::WarpedArray, coords...) = Base._unsafe_getindex!(dest, Base.LinearSlow(), W, coords...)
+if VERSION < v"0.5.0-dev"
+    getindex!(dest, W::WarpedArray, coords...) = Base._unsafe_getindex!(dest, Base.LinearSlow(), W, coords...)
+else
+    getindex!(dest, W::WarpedArray, coords...) = Base._unsafe_getindex!(dest, W, coords...)
+end
 
 """
 `Atrans = translate(A, displacement)` shifts `A` by an amount
@@ -567,7 +571,7 @@ function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     wpids = addprocs(nworkers)
     simg = Array(Any, 0)
     swarped = Array(Any, 0)
-    rrs = Array(RemoteRef, 0)
+    rrs = Array{RemoteChannel}(0)
     mydir = splitdir(@__FILE__)[1]
     for p in wpids
         remotecall_fetch(p, Main.eval, :(push!(LOAD_PATH, $mydir)))
@@ -577,7 +581,7 @@ function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     end
     nextidx = 0
     getnextidx() = nextidx += 1
-    writing_mutex = RemoteRef()
+    writing_mutex = RemoteChannel()
     prog = Progress(n, 1, "Stacks:")
     @sync begin
         for i = 1:nworkers
