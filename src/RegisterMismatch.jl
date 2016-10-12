@@ -161,7 +161,7 @@ function mismatch!(mm::MismatchArray, cms::CMStorage, moving::AbstractArray; nor
     end
     cms.ifftfunc!(cms.buf1)
     cms.ifftfunc!(cms.buf2)
-    copy!(mm, (sub(real(cms.buf1), cms.shiftindexes...), sub(real(cms.buf2), cms.shiftindexes...)))
+    copy!(mm, (view(real(cms.buf1), cms.shiftindexes...), view(real(cms.buf2), cms.shiftindexes...)))
     mm
 end
 
@@ -223,8 +223,8 @@ function mismatch_apertures!(mms, fixed, moving, aperture_centers, cms; normaliz
         rng = aperture_range(center, cms.aperture_width)
         # sub throws an error in 0.4 when rng extends outside of
         #    bounds, see julia #10296.
-	fsnip = Base.sub_unsafe(data(fixed), rng)
-        msnip = Base.sub_unsafe(data(moving), rng)
+	fsnip = Base.unsafe_view(data(fixed), rng...)
+        msnip = Base.unsafe_view(data(moving), rng...)
         # Perform the calculation
         fillfixed!(cms, fsnip)
         mismatch!(mm, cms, msnip; normalization=normalization)
@@ -258,14 +258,14 @@ end
 
 function fillfixed!{T}(cms::CMStorage{T}, fixed::AbstractArray)
     fill!(cms.padded, NaN)
-    X = sub(cms.padded, ntuple(d->(1:size(fixed,d))+cms.maxshift[d], ndims(fixed)))
+    X = view(cms.padded, ntuple(d->(1:size(fixed,d))+cms.maxshift[d], ndims(fixed))...)
     copy!(X, fixed)
     fftnan!(cms.fixed, cms.padded, cms.fftfunc!)
 end
 
 function fillfixed!{T}(cms::CMStorage{T}, fixed::SubArray)
     fill!(cms.padded, NaN)
-    X = sub(cms.padded, ntuple(d->(1:size(fixed,d))+cms.maxshift[d], ndims(fixed)))
+    X = view(cms.padded, ntuple(d->(1:size(fixed,d))+cms.maxshift[d], ndims(fixed))...)
     get!(X, parent(fixed), parentindexes(fixed), convert(T, NaN))
     fftnan!(cms.fixed, cms.padded, cms.fftfunc!)
 end
