@@ -415,7 +415,7 @@ function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
     opt || return E0, uout, Q
     local QL
     try
-        QL = full(chol(Q, Val{:L}))
+        QL = full(ctranspose(chol(Hermitian(Q))))
     catch err
         if isa(err, LinAlg.PosDefException)
             warn("Fixing positive-definite exception:")
@@ -435,8 +435,11 @@ function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
         end
     end
     local results
+    function solveql(C, dE, QL, x)
+        nlsolve((x,fx)->QLerr!(x, fx, C, dE, similar(QL)), (x,gx)->QLjac!(x, gx, C, similar(QL)), x)
+    end
     try
-        results = nlsolve((x,fx)->QLerr!(x, fx, C, dE, similar(QL)), (x,gx)->QLjac!(x, gx, C, similar(QL)), x)
+        results = solveql(C, dE, QL, x)
     catch err
         @show C dE QL x
         rethrow(err)
