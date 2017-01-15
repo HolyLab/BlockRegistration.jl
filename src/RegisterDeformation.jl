@@ -62,8 +62,8 @@ RegisterDeformation
 abstract AbstractDeformation{T,N}
 Base.eltype{T,N}(::Type{AbstractDeformation{T,N}}) = T
 Base.ndims{T,N}(::Type{AbstractDeformation{T,N}}) = N
-Base.eltype{D<:AbstractDeformation}(::Type{D}) = eltype(super(D))
-Base.ndims{D<:AbstractDeformation}(::Type{D}) = ndims(super(D))
+Base.eltype{D<:AbstractDeformation}(::Type{D}) = eltype(supertype(D))
+Base.ndims{D<:AbstractDeformation}(::Type{D}) = ndims(supertype(D))
 Base.eltype(d::AbstractDeformation) = eltype(typeof(d))
 Base.ndims(d::AbstractDeformation) = ndims(typeof(d))
 
@@ -170,10 +170,10 @@ function griddeformations{N,FV<:FixedVector}(u::AbstractArray{FV}, knots::NTuple
     ndims(u) == N+1 || error("Need $(N+1) dimensions for a vector of $N-dimensional deformations")
     length(FV) == N || throw(DimensionMismatch("Dimensionality $(length(FV)) must match $N knot vectors"))
     colons = ntuple(d->Colon(), N)::NTuple{N,Colon}
-    [GridDeformation(slice(u, colons..., i), knots) for i = 1:size(u, N+1)]
+    [GridDeformation(view(u, colons..., i), knots) for i = 1:size(u, N+1)]
 end
 
-Base.copy{T,N,A,L}(ϕ::GridDeformation{T,N,A,L}) = (u = copy(ϕ.u); GridDeformation{T,N,typeof(u),L}(u, copy(ϕ.knots)))
+Base.copy{T,N,A,L}(ϕ::GridDeformation{T,N,A,L}) = (u = copy(ϕ.u); GridDeformation{T,N,typeof(u),L}(u, map(copy, ϕ.knots)))
 
 # # TODO: flesh this out
 # immutable VoroiDeformation{T,N,Vu<:AbstractVector,Vc<:AbstractVector} <: AbstractDeformation{T,N}
@@ -216,8 +216,7 @@ end
 end
 
 # Composition ϕ_old(ϕ_new(x))
-function Base.call{T1,T2,N,A<:AbstractInterpolation}(
-        ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
+function (ϕ_old::GridDeformation{T1,N,A}){T1,T2,N,A<:AbstractInterpolation}(ϕ_new::GridDeformation{T2,N})
     uold, knots = ϕ_old.u, ϕ_old.knots
     if !isa(ϕ_new.u, AbstractInterpolation)
         ϕ_new.knots == knots || error("If knots are incommensurate, ϕ_new must be interpolating")
@@ -226,7 +225,7 @@ function Base.call{T1,T2,N,A<:AbstractInterpolation}(
     GridDeformation(ucomp, knots)
 end
 
-Base.call(ϕ_old::GridDeformation, ϕ_new::GridDeformation) =
+(ϕ_old::GridDeformation)(ϕ_new::GridDeformation) =
     error("ϕ_old must be interpolating")
 
 function _compose(uold, unew, knots)
@@ -324,7 +323,7 @@ function medfilt{D<:AbstractDeformation}(ϕs::AbstractVector{D}, n)
     2nhalf+1 == n || error("filter size must be odd")
     T = eltype(eltype(D))
     v = Array(T, ndims(D), n)
-    vs = ntuple(d->slice(v, d, :), ndims(D))
+    vs = ntuple(d->view(v, d, :), ndims(D))
     ϕ1 = copy(ϕs[1])
     ϕout = Array(typeof(ϕ1), length(ϕs))
     ϕout[1] = ϕ1
@@ -554,7 +553,7 @@ function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, ϕ
     destarray = Array(T, ssz)
     @showprogress 1 "Stacks:" for i = 1:n
         ϕ = extracti(ϕs, i, ssz)
-        warp!(destarray, slice(img, "t", i), ϕ)
+        warp!(destarray, view(img, "t", i), ϕ)
         warp_write(dest, destarray, i)
     end
     nothing
@@ -574,8 +573,8 @@ function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     rrs = Array{RemoteChannel}(0)
     mydir = splitdir(@__FILE__)[1]
     for p in wpids
-        remotecall_fetch(p, Main.eval, :(push!(LOAD_PATH, $mydir)))
-        remotecall_fetch(p, Main.eval, :(using RegisterDeformation))
+        remotecall_fetch(Main.eval, p, :(push!(LOAD_PATH, $mydir)))
+        remotecall_fetch(Main.eval, p, :(using RegisterDeformation))
         push!(simg, SharedArray(eltype(img), ssz, pids=[myid(),p]))
         push!(swarped, SharedArray(T, ssz, pids=[myid(),p]))
     end
@@ -591,8 +590,8 @@ function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
             @async begin
                 while (idx = getnextidx()) <= n
                     ϕ = extracti(ϕs, idx, ssz)
-                    copy!(src, slice(img, "t", idx))
-                    remotecall_fetch(p, warp!, warped, src, ϕ)
+                    copy!(src, view(img, "t", idx))
+                    remotecall_fetch(warp!, p, warped, src, ϕ)
                     put!(writing_mutex, true)
                     warp_write(dest, warped, idx)
                     update!(prog, idx)

@@ -1,3 +1,4 @@
+julia 0.5
 Images
 Interpolations
 AffineTransforms 0.1.3

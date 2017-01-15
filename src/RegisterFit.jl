@@ -410,7 +410,7 @@ function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
     U, s, V = svd(M)
     s1 = s[1]
     sinv = T[v < sqrt(eps(T))*s1 ? zero(T) : 1/v for v in s]
-    Minv = V*scale(sinv, U')
+    Minv = V * Diagonal(sinv) * U'
     Q = Minv*dE*Minv
     opt || return E0, uout, Q
     local QL

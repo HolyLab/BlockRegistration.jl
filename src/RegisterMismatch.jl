@@ -34,7 +34,7 @@ The major types and functions exported are:
 """
 RegisterMismatch
 
-FFTW.set_num_threads(min(CPU_CORES, 8))
+FFTW.set_num_threads(min(Sys.CPU_CORES, 8))
 const FFTPROD = [2,3]
 
 type NanCorrFFTs{T<:AbstractFloat,N}

@@ -33,9 +33,9 @@ Spad = RegisterCore.paddedview(S)
 @test Spad == A[:,:,2]
 S2 = RegisterCore.trimmedview(A[:,:,2], S)
 @test S2 == S
-S = slice(A, 2:4, 2, 1:3)
+S = view(A, 2:4, 2, 1:3)
 Spad = RegisterCore.paddedview(S)
-Aslice = slice(A, :, 2, :)
+Aslice = view(A, :, 2, :)
 @test Spad == Aslice
 S2 = RegisterCore.trimmedview(copy(Aslice), S)
 @test S2 == S

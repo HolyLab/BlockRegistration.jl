@@ -31,10 +31,10 @@ RegisterPenalty
 
 abstract DeformationPenalty{T,N}
 Base.eltype{T,N}(::Type{DeformationPenalty{T,N}}) = T
-Base.eltype{DP<:DeformationPenalty}(::Type{DP}) = eltype(super(DP))
+Base.eltype{DP<:DeformationPenalty}(::Type{DP}) = eltype(supertype(DP))
 Base.eltype(dp::DeformationPenalty) = eltype(typeof(dp))
 Base.ndims{T,N}(::Type{DeformationPenalty{T,N}}) = N
-Base.ndims{DP<:DeformationPenalty}(::Type{DP}) = ndims(super(DP))
+Base.ndims{DP<:DeformationPenalty}(::Type{DP}) = ndims(supertype(DP))
 Base.ndims(dp::DeformationPenalty) = ndims(typeof(dp))
 
 """

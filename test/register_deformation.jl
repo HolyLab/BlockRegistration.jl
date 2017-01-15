@@ -2,7 +2,7 @@ import BlockRegistration, RegisterDeformation
 using AffineTransforms, Interpolations, ColorTypes, ForwardDiff, FixedSizeArrays, Images
 using Base.Test
 
-include("register_test_utilities.jl")
+using RegisterTestUtilities
 
 knots = (linspace(1,15,5), linspace(1,11,3))
 @test RegisterDeformation.arraysize(knots) == (15,11)
@@ -124,7 +124,7 @@ RegisterDeformation.getindex!(dest, q, 1:10)
 @assert maximum(abs(dest - p[6:15])) < 10*eps(maximum(abs(dest)))
 
 # SubArray (test whether we can go beyond edges)
-psub = sub(collect(p), 3:20)
+psub = view(collect(p), 3:20)
 ϕ = RegisterDeformation.GridDeformation([0.0,0.0]', size(p))
 q = RegisterDeformation.WarpedArray(psub, ϕ);
 RegisterDeformation.getindex!(dest, q, -1:8)
@@ -280,7 +280,7 @@ save(fn, "ϕ", ϕ)
 ϕ2 = load(fn, "ϕ")
 @test ϕ2.u == ϕ.u
 @test ϕ2.knots == ϕ.knots
-str = readall(`h5dump $fn`)
+str = readstring(`h5dump $fn`)
 @test !isempty(search(str, "SIMPLE { ( 5, 3, 2 ) / ( 5, 3, 2 ) }"))
 
 # temporal interpolation

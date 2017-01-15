@@ -39,7 +39,7 @@ for I in eachindex(A)
 end
 
 io = IOBuffer()
-writemime(io, MIME("text/plain"), A)
+show(io, MIME("text/plain"), A)
 str = takebuf_string(io)
 @test isempty(search(str, "undef"))
 

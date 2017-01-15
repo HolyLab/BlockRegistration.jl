@@ -1,4 +1,5 @@
 using BlockRegistration
+push!(LOAD_PATH, dirname(@__FILE__))  # for RegisterTestUtilities
 
 function runtest(filename)
     println(filename)
