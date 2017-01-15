@@ -2,7 +2,7 @@ __precompile__()
 
 module RegisterMismatchCuda
 
-using CUDArt, CUDAdrv, CUFFT, Images, RegisterCore
+using CUDArt, CUFFT, Images, RegisterCore
 
 import Base: close, eltype, ndims
 import CUDArt: free, device, pitchedptr
@@ -44,7 +44,7 @@ function init(devlist)
     for dev in devlist
         device(dev)
         thisdir = splitdir(@__FILE__)[1]
-        md = CuModuleFile(joinpath(thisdir, "register_mismatch_cuda.ptx")) #, false)
+        md = CuModule(joinpath(thisdir, "register_mismatch_cuda.ptx"), false)
         ptxdict[(dev, "components_func", Float32)] = CuFunction(md, "kernel_conv_components_float")
         ptxdict[(dev, "components_func", Float64)] = CuFunction(md, "kernel_conv_components_double")
         ptxdict[(dev, "conv_func", :pixels, Float32)] = CuFunction(md, "kernel_calcNumDenom_pixels_float")
@@ -258,9 +258,9 @@ function fillfixed!{T}(cms::CMStorage{T}, fixed::CudaPitchedArray; f_indexes = n
     copy!(paddedf, tuple(dstindexes...), fixed, tuple(srcindexes...), stream=stream)
     # Prepare the components of the convolution
     cudablocksize = (16,16)
-    nsm = CUDArt.attribute(device(), CUDArt.rt.cudaDevAttrMultiProcessorCount)
+    nsm = attribute(device(), CUDArt.rt.cudaDevAttrMultiProcessorCount)
     mul = min(32, ceil(Int, length(paddedf)/(prod(cudablocksize)*nsm)))
-    cudacallt(components_func, mul*nsm, cudablocksize, (paddedf, cms.fixed.I2[1],  cms.fixed.I0[1],  size(paddedf,1), size(paddedf,2), size(paddedf,3), pitchel(paddedf)), stream=stream)
+    CUDArt.launch(components_func, mul*nsm, cudablocksize, (paddedf, cms.fixed.I2[1],  cms.fixed.I0[1],  size(paddedf,1), size(paddedf,2), size(paddedf,3), pitchel(paddedf)), stream=stream)
     # Compute FFTs
     obj = cms.fixed
     for item in (obj.I0, obj.I1, obj.I2)
@@ -289,9 +289,9 @@ function mismatch!{T}(mm::MismatchArray, cms::CMStorage{T}, moving::CudaPitchedA
     get!(paddedm, moving, ntuple(d->cms.getindexes[d]+m_offset[d], nd), NaN, stream=stream)
     # Prepare the components of the convolution
     cudablocksize = (16,16)
-    nsm = CUDArt.attribute(device(), CUDArt.rt.cudaDevAttrMultiProcessorCount)
+    nsm = attribute(device(), CUDArt.rt.cudaDevAttrMultiProcessorCount)
     mul = min(32, ceil(Int, length(paddedm)/(prod(cudablocksize)*nsm)))
-    cudacallt(components_func, mul*nsm, cudablocksize, (paddedm, cms.moving.I2[1], cms.moving.I0[1], size(paddedm,1), size(paddedm,2), size(paddedm,3), pitchel(paddedm)), stream=stream)
+    CUDArt.launch(components_func, mul*nsm, cudablocksize, (paddedm, cms.moving.I2[1], cms.moving.I0[1], size(paddedm,1), size(paddedm,2), size(paddedm,3), pitchel(paddedm)), stream=stream)
     # Compute FFTs
     obj = cms.moving
     for item in (obj.I0, obj.I1, obj.I2)
@@ -300,7 +300,7 @@ function mismatch!{T}(mm::MismatchArray, cms::CMStorage{T}, moving::CudaPitchedA
     # Perform the convolution in fourier space
     d_numC = cms.num[2]
     d_denomC = cms.denom[2]
-    cudacallt(conv_func, mul*nsm, cudablocksize, (
+    CUDArt.launch(conv_func, mul*nsm, cudablocksize, (
         cms.fixed.I1[2],  cms.fixed.I2[2],  cms.fixed.I0[2],
         cms.moving.I1[2], cms.moving.I2[2], cms.moving.I0[2],
         cms.num[2], cms.denom[2],
@@ -310,7 +310,7 @@ function mismatch!{T}(mm::MismatchArray, cms::CMStorage{T}, moving::CudaPitchedA
     fdshift = cms.fdshift
     d_num = cms.num[1]
     d_denom = cms.denom[1]
-    cudacallt(fdshift_func, mul*nsm, cudablocksize, (
+    CUDArt.launch(fdshift_func, mul*nsm, cudablocksize, (
         d_numC, d_denomC,
         convert(T,fdshift[1]),
         convert(T,length(fdshift)>1 ? fdshift[2] : 0),
@@ -356,21 +356,5 @@ end
 function assertsamesize(A::CudaPitchedArray, B::CudaPitchedArray)
     size(A,1) == size(B,1) && size(A,2) == size(B,2) && size(A,3) == size(B,3) || error("Arrays are not the same size")
 end
-
-function cudacallt(f, griddim, blockdim, args; stream=CUDAdrv.default_stream())
-    launchargs = map(cu_args, args)
-    typ = typesof(launchargs...)
-    cudacall(f, griddim, blockdim, typ, launchargs...; stream=cu_stream(stream))
-end
-
-cu_args(a::CUDArt.CudaArray) = a.ptr
-cu_args(a::CUDArt.CudaPitchedArray) = a.ptr.ptr
-cu_args(a::CUDArt.CdArray) = pointer(a)
-cu_args(x) = x
-
-cu_stream(stream::CUDAdrv.CuStream) = stream
-cu_stream(stream::CUDArt.Stream) = stream.inner
-
-typesof(args...) = map(a->(isa(a,Type) ? Type{a} : typeof(a)), args)
 
 end # module
