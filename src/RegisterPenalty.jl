@@ -31,10 +31,10 @@ RegisterPenalty
 
 abstract DeformationPenalty{T,N}
 Base.eltype{T,N}(::Type{DeformationPenalty{T,N}}) = T
-Base.eltype{DP<:DeformationPenalty}(::Type{DP}) = eltype(super(DP))
+Base.eltype{DP<:DeformationPenalty}(::Type{DP}) = eltype(supertype(DP))
 Base.eltype(dp::DeformationPenalty) = eltype(typeof(dp))
 Base.ndims{T,N}(::Type{DeformationPenalty{T,N}}) = N
-Base.ndims{DP<:DeformationPenalty}(::Type{DP}) = ndims(super(DP))
+Base.ndims{DP<:DeformationPenalty}(::Type{DP}) = ndims(supertype(DP))
 Base.ndims(dp::DeformationPenalty) = ndims(typeof(dp))
 
 """
@@ -124,12 +124,12 @@ function penalty!{T<:Number,D<:AbstractDeformation}(gs::Array{T}, ϕs::AbstractV
 end
 
 function _penalty!{T,N}(gs, ϕs, ϕs_old, dp::DeformationPenalty{T,N}, mmis, keeps, i)
-    colons = ntuple(ColonFun(), Val{N})
+    colons = ntuple(ColonFun, Val{N})
     indexes = (colons..., i)
-    mmi = slice(mmis, indexes)
-    keep = slice(keeps, indexes)
+    mmi = view(mmis, indexes...)
+    keep = view(keeps, indexes...)
     calc_gradient = gs != nothing && !isempty(gs)
-    g = calc_gradient ? slice(gs, indexes) : nothing
+    g = calc_gradient ? view(gs, indexes...) : nothing
     if isa(ϕs_old, AbstractVector)
         penalty!(g, ϕs[i], ϕs_old[i], dp, mmi, keep)
     else
@@ -428,7 +428,7 @@ end
 function vec2ϕs{T,N}(x::Array{T}, gridsize::NTuple{N,Int}, n, knots)
     xr = RegisterDeformation.convert_to_fixed(Vec{N,T}, x, (gridsize..., n))
     colons = ntuple(d->Colon(), N)::NTuple{N,Colon}
-    [GridDeformation(slice(xr, (colons..., i)), knots) for i = 1:n]
+    [GridDeformation(view(xr, colons..., i), knots) for i = 1:n]
 end
 
 """

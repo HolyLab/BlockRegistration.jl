@@ -1,3 +1,8 @@
+module RegisterTestUtilities
+using BlockRegistration
+
+export quadratic, block_center, tighten
+
 function quadratic(m, n, shift, Q)
     A = zeros(m, n)
     c = block_center(m, n)
@@ -23,4 +28,6 @@ function tighten(A::AbstractArray)
     end
     At = similar(A, T)
     copy!(At, A)
+end
+
 end

@@ -4,7 +4,7 @@ using RegisterCore, RegisterDeformation
 RP = RegisterPenalty
 
 # could probably update tests below to make better use of this
-include("register_test_utilities.jl")
+using RegisterTestUtilities
 
 gridsize = (9,7)
 maxshift = (3,3)
@@ -48,7 +48,7 @@ g = similar(ϕ.u)
 @inferred(RP.penalty!(g, dp, ϕ))
 for i = 1:prod(gridsize)
     for j = 1:2
-        ud = dual(u)
+        ud = dual.(u)
         ud[j,i] = dual(u[j,i], 1)
         ϕd = GridDeformation(ud, imgsize)
         pd = RP.penalty!(nothing, dp, ϕd)
@@ -63,7 +63,7 @@ uold = randn(2, gridsize...)
 RP.penalty!(g, dp, ϕ_c, g_c)
 for i = 1:prod(gridsize)
     for j = 1:2
-        ud = dual(u)
+        ud = dual.(u)
         ud[j,i] = dual(u[j,i], 1)
         ϕd = interpolate(GridDeformation(ud, imgsize))
         pd = RP.penalty!(nothing, dp, ϕ_old(ϕd))

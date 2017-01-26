@@ -144,7 +144,7 @@ function RigidValue{T<:Real}(fixed::AbstractArray, moving::AbstractArray{T}, SD,
     RigidValue{ndims(f),typeof(f),typeof(metp),typeof(SD)}(f, !fnan, metp, SD, thresh)
 end
 
-function Base.call(d::RigidValue, x)
+function (d::RigidValue)(x)
     tfm = p2rigid(x, d.SD)
     mov = transform(d.moving, tfm)
     movnan = isnan(mov)
@@ -311,10 +311,10 @@ function _affine_part!{T,N}(g, ap::AffinePenalty{T,N}, u)
     elseif ndims(u) == N+1
         # Last dimension is time
         n = size(u)[end]
-        colons = ntuple(ColonFun(), Val{N})
+        colons = ntuple(ColonFun, Val{N})
         for i = 1:n
             indexes = (colons..., i)
-            snew = penalty!(slice(g, indexes), ap, slice(u, indexes))
+            snew = penalty!(view(g, indexes...), ap, view(u, indexes...))
             if i == 1
                 s = snew
             else
@@ -603,7 +603,7 @@ function fixed_λ{T,N,_}(cs::AbstractArray{Vec{N,T}}, Qs::AbstractArray{Mat{N,N,
         Base.warn_once("initial_deformation failed to converge with λ = ", ap.λ, ", λt = ", λt)
     end
     uclamp!(u0, maxshift)
-    colons = ntuple(ColonFun(), Val{N})
+    colons = ntuple(ColonFun, Val{N})
     ϕs = [GridDeformation(u0[colons..., i], knots) for i = 1:size(u0)[end]]
     local mismatch
     println("Starting optimization.")
@@ -861,8 +861,8 @@ function vec2vecϕ{T,N}(Qs::Array{Mat{N,N,T}}, x::AbstractVector{T})
 end
 
 @noinline function _vec2vecϕ{N}(x::AbstractArray, sz::NTuple{N,Int})
-    colons = ntuple(ColonFun(), Val{N})
-    [GridDeformation(slice(x, (colons..., i)), sz) for i = 1:size(x)[end]]
+    colons = ntuple(ColonFun, Val{N})
+    [GridDeformation(view(x, colons..., i), sz) for i = 1:size(x)[end]]
 end
 
 

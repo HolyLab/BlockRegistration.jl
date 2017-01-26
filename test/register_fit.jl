@@ -2,7 +2,7 @@ import BlockRegistration, RegisterFit
 using Base.Test, AffineTransforms, Interpolations
 using RegisterCore
 
-include("register_test_utilities.jl")
+using RegisterTestUtilities
 
 ### qfit
 

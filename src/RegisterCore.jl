@@ -8,7 +8,7 @@ using Images, ColorTypes
 
 import Base: +, -, *, /
 import Base: eltype, getindex, ndims, pointer, setindex!, show, size
-import Base: checksize, unsafe_getindex
+import Base: unsafe_getindex
 import CenterIndexedArrays: CenterIndexedArray
 import Images: separate
 
@@ -230,7 +230,7 @@ maxshift(A::MismatchArray) = A.halfsize
 `(num,denom)` into a single `MismatchArray`.  This is useful
 preparation for interpolation.
 """
-function Base.call{M<:MismatchArray}(::Type{M}, num::AbstractArray, denom::AbstractArray)
+function (::Type{M}){M<:MismatchArray}(num::AbstractArray, denom::AbstractArray)
     size(num) == size(denom) || throw(DimensionMismatch("num and denom must have the same size"))
     T = promote_type(eltype(num), eltype(denom))
     numdenom = CenterIndexedArray(NumDenom{T}, size(num))
@@ -347,8 +347,8 @@ ratio(mm::MismatchArray, thresh) = ratio(mm, thresh, convert(eltype(eltype(mm)),
 
 ratio{T<:Real}(r::CenterIndexedArray{T}, thresh, fillval=convert(T,NaN)) = r
 
-Base.call{M<:MismatchArray,T}(::Type{M}, ::Type{T}, dims) = CenterIndexedArray(NumDenom{T}, dims)
-Base.call{M<:MismatchArray,T}(::Type{M}, ::Type{T}, dims...) = CenterIndexedArray(NumDenom{T}, dims)
+(::Type{M}){M<:MismatchArray,T}(::Type{T}, dims) = CenterIndexedArray(NumDenom{T}, dims)
+(::Type{M}){M<:MismatchArray,T}(::Type{T}, dims...) = CenterIndexedArray(NumDenom{T}, dims)
 
 function Base.copy!(M::MismatchArray, nd::Tuple{AbstractArray, AbstractArray})
     num, denom = nd
@@ -436,7 +436,7 @@ See also `trimmedview`.
 """
 paddedview(A::SubArray) = _paddedview(A, (), (), A.indexes...)
 _paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
-    SubArray{T,N,P,I,0}(A.parent, newindexes, newsize, 0, 0) # punt on first_index
+    SubArray(A.parent, newindexes, newsize)
 @inline function _paddedview(A, newindexes, newsize, index, indexes...)
     d = length(newindexes)+1
     _paddedview(A, (newindexes..., pdindex(A.parent, d, index)), pdsize(A.parent, newsize, d, index), indexes...)
@@ -461,7 +461,7 @@ function trimmedview(Bpad, A::SubArray)
     ndims(Bpad) == ndims(A) || throw(DimensionMismatch("dimensions $(ndims(Bpad)) and $(ndims(A)) of Bpad and A must match"))
     _trimmedview(Bpad, A.parent, 1, (), A.indexes...)
 end
-_trimmedview(Bpad, P, d, newindexes) = sub(Bpad, newindexes)
+_trimmedview(Bpad, P, d, newindexes) = view(Bpad, newindexes...)
 @inline _trimmedview(Bpad, P, d, newindexes, index::Real, indexes...) =
     _trimmedview(Bpad, P, d+1, newindexes, indexes...)
 @inline function _trimmedview(Bpad, P, d, newindexes, index, indexes...)
@@ -475,6 +475,6 @@ end
 
 # For faster and type-stable slicing
 immutable ColonFun end
-Base.call(::ColonFun, ::Int) = Colon()
+(::Type{ColonFun})(::Int) = Colon()
 
 end

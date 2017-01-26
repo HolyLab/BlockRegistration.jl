@@ -384,7 +384,7 @@ safe for `src` SubArrays whose `indexes` may not be in-bounds.
 """
 function safe_get!(dest::AbstractArray, src::SubArray, isrc, default)
     # Trim the source region, ignoring bounds constraints
-    src2 = Base.sub_unsafe(src, tuple(isrc...))
+    src2 = extraunsafe_view(src, isrc...)
     assertsamesize(dest, src2)
     # Determine the in-bounds region. If src slices some dimensions,
     # we need to skip over them.
@@ -423,3 +423,18 @@ rightedge(center, width) = leftedge(center+width, width) - 1
 # These avoid making a copy if it's not necessary
 tovec(v::AbstractVector) = v
 tovec(v::Tuple) = [v...]
+
+
+### Utilities for unsafe indexing of views
+# TODO: redesign this whole thing to be safer?
+using Base: ViewIndex, to_indexes, unsafe_length, index_shape, tail
+
+@inline function extraunsafe_view{T,N}(V::SubArray{T,N}, I::Vararg{ViewIndex,N})
+    idxs = unsafe_reindex(V, V.indexes, to_indexes(I...))
+    SubArray(V.parent, idxs, map(unsafe_length, (index_shape(V.parent, idxs...))))
+end
+
+unsafe_reindex(V, idxs::Tuple{UnitRange, Vararg{Any}}, subidxs::Tuple{UnitRange, Vararg{Any}}) =
+    (Base.@_propagate_inbounds_meta; @inbounds new1 = idxs[1][subidxs[1]]; (new1, unsafe_reindex(V, tail(idxs), tail(subidxs))...))
+
+unsafe_reindex(V, idxs, subidxs) = Base.reindex(V, idxs, subidxs)

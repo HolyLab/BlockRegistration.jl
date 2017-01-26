@@ -1,4 +1,4 @@
-import BlockRegistration
+# import BlockRegistration
 using CenterIndexedArrays, Base.Test
 
 CenterIndexedArray(Float32, 3, 5)
@@ -39,7 +39,7 @@ for I in eachindex(A)
 end
 
 io = IOBuffer()
-writemime(io, MIME("text/plain"), A)
+show(io, MIME("text/plain"), A)
 str = takebuf_string(io)
 @test isempty(search(str, "undef"))
 
@@ -51,17 +51,18 @@ end
 # Standard julia operations
 B = copy(A)
 
-@test B == dat
+@test B.data == dat
 @test B == A
-@test isequal(B, dat)
 @test isequal(B, A)
 
 @test vec(A) == vec(dat)
 
 @test minimum(A) == minimum(dat)
 @test maximum(A) == maximum(dat)
-@test minimum(A,1) == minimum(dat,1)
-@test maximum(A,2) == maximum(dat,2)
+# @test minimum(A,1) == minimum(dat,1)
+# @test maximum(A,2) == maximum(dat,2)
+@test minimum(A,1) == CenterIndexedArray(minimum(dat,1))
+@test maximum(A,2) == CenterIndexedArray(maximum(dat,2))
 
 amin, iamin = findmin(A)
 dmin, idmin = findmin(dat)
@@ -87,18 +88,18 @@ rand!(dat)
 @test cat(1, A, dat) == cat(1, dat, dat)
 @test cat(2, A, dat) == cat(2, dat, dat)
 
-@test permutedims(A, (2,1)) == permutedims(dat, (2,1))
-@test ipermutedims(A, (2,1)) == ipermutedims(dat, (2,1))
+@test permutedims(A, (2,1)) == CenterIndexedArray(permutedims(dat, (2,1)))
+@test ipermutedims(A, (2,1)) == CenterIndexedArray(ipermutedims(dat, (2,1)))
 
-@test cumsum(A, 1) == cumsum(dat, 1)
-@test cumsum(A, 2) == cumsum(dat, 2)
+@test cumsum(A, 1) == CenterIndexedArray(cumsum(dat, 1))
+@test cumsum(A, 2) == CenterIndexedArray(cumsum(dat, 2))
 
-@test mapslices(v->sort(v), A, 1) == mapslices(v->sort(v), dat, 1)
-@test mapslices(v->sort(v), A, 2) == mapslices(v->sort(v), dat, 2)
+@test mapslices(v->sort(v), A, 1) == CenterIndexedArray(mapslices(v->sort(v), dat, 1))
+@test mapslices(v->sort(v), A, 2) == CenterIndexedArray(mapslices(v->sort(v), dat, 2))
 
-@test flipdim(A, 1) == flipdim(dat, 1)
-@test flipdim(A, 2) == flipdim(dat, 2)
+@test flipdim(A, 1) == CenterIndexedArray(flipdim(dat, 1))
+@test flipdim(A, 2) == CenterIndexedArray(flipdim(dat, 2))
 
-@test A + 1 == dat + 1
-@test 2*A == 2*dat
-@test A+A == dat+dat
+@test A + 1 == CenterIndexedArray(dat + 1)
+@test 2*A == CenterIndexedArray(2*dat)
+@test A+A == CenterIndexedArray(dat+dat)

@@ -2,7 +2,7 @@ using FixedSizeArrays, AffineTransforms, Interpolations, Base.Test
 import BlockRegistration, RegisterOptimize
 using RegisterCore, RegisterPenalty, RegisterDeformation
 
-include("register_test_utilities.jl")
+using RegisterTestUtilities
 
 ### Rigid registration
 fixed = sin(linspace(0,pi,101)).*linspace(5,7,97)'

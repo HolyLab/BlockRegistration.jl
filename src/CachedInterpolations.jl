@@ -103,11 +103,11 @@ end
 
 @generated function Base.getindex{T,N,M,O}(itp::CachedInterpolation{T,N,M,O}, xs::Number...)
     length(xs) == N || error("Must use $N indexes")
-    ibsyms = [symbol("ib_", d) for d = 1:N]
-    ipsyms = [symbol("ip_", d) for d = 1:N]
+    ibsyms = [Symbol("ib_", d) for d = 1:N]
+    ipsyms = [Symbol("ip_", d) for d = 1:N]
     cache_ex = :(itp.coefs[$(ibsyms...), itp.tileindex] = itp.parent[$(ipsyms...), itp.tileindex])
     IT = Tuple{ntuple(d->BSpline{Quadratic{InPlace}}, N)..., NoInterp}
-    ixlast = symbol("ix_", N+1)
+    ixlast = Symbol("ix_", N+1)
     ixlast_ex = :($ixlast = itp.tileindex)
     quote
         $(Expr(:meta, :inline))
