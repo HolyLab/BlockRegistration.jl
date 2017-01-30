@@ -1,5 +1,5 @@
 import BlockRegistration, RegisterMismatch
-using CenterIndexedArrays, RegisterCore
+using CenterIndexedArrays, RegisterCore, Images
 using Base.Test
 
 # Iterators
@@ -65,8 +65,8 @@ end
 const accuracy = 1e-6
 for imsz in ((7,10), (6,5))
     for maxshift in ([4,3],[3,2])
-        Apad = Images.padarray(reshape(1:prod(imsz), imsz[1], imsz[2]), maxshift, maxshift, "value", 0)
-        Bpad = Images.padarray(rand(1:20, imsz[1], imsz[2]), maxshift, maxshift, "value", 0)
+        Apad = parent(Images.padarray(reshape(1:prod(imsz), imsz[1], imsz[2]), Fill(0, maxshift, maxshift)))
+        Bpad = parent(Images.padarray(rand(1:20, imsz[1], imsz[2]), Fill(0, maxshift, maxshift)))
         for RM in RMlist
             # intensity normalization
             mm = RM.mismatch(Apad, Bpad, maxshift, normalization=:intensity)
@@ -114,8 +114,8 @@ nd1 = RegisterMismatch.mismatch0(mms)
 for imsz in ((15,16), (14,17))
     for maxshift in ([4,3],[3,2])
         for gridsize in ([2,1], [2,3],[2,2],[1,3])
-            Apad = Images.padarray(reshape(1:prod(imsz), imsz[1], imsz[2]), maxshift, maxshift, "value", 0)
-            Bpad = Images.padarray(rand(1:20, imsz[1], imsz[2]), maxshift, maxshift, "value", 0)
+            Apad = parent(Images.padarray(reshape(1:prod(imsz), imsz[1], imsz[2]), Fill(0, maxshift, maxshift)))
+            Bpad = parent(Images.padarray(rand(1:20, imsz[1], imsz[2]), Fill(0, maxshift, maxshift)))
             for RM in RMlist
                 # intensity normalization
                 mms = RM.mismatch_apertures(Float64, Apad, Bpad, gridsize, maxshift, normalization=:intensity, display=false)
@@ -144,8 +144,8 @@ end
 
 for RM in RMlist
     # Test 3d similarly
-    Apad = Images.padarray(reshape(1:80*6, 10, 8, 6), [4,3,2], [4,3,2], "value", 0)
-    Bpad = Images.padarray(rand(1:80*6, 10, 8, 6), [4,3,2], [4,3,2], "value", 0)
+    Apad = parent(Images.padarray(reshape(1:80*6, 10, 8, 6), Fill(0, (4,3,2))))
+    Bpad = parent(Images.padarray(rand(1:80*6, 10, 8, 6), Fill(0, (4,3,2))))
     mm = RM.mismatch(Apad, Bpad, [4,3,2])
     num, denom = RegisterCore.separate(mm)
     mmref = CenterIndexedArray(Float64, 9, 7, 5)

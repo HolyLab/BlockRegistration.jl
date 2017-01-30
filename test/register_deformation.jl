@@ -1,5 +1,5 @@
 import BlockRegistration, RegisterDeformation
-using AffineTransforms, Interpolations, ColorTypes, ForwardDiff, FixedSizeArrays, Images
+using AffineTransforms, Interpolations, ColorTypes, ForwardDiff, FixedSizeArrays, Images, AxisArrays
 using Base.Test
 
 using RegisterTestUtilities
@@ -232,7 +232,7 @@ C = RegisterDeformation.warpgrid(ϕ, showidentity=true)
 # Writing warped data to disk
 o = ones(Float32, 5, 5)
 A = o .* reshape(1:7, (1,1,7))
-img = Image(A, timedim=3)
+img = AxisArray(A, :y, :x, :time)
 fn = tempname()
 # With Vector{GridDeformation}
 ϕs = tighten([RegisterDeformation.GridDeformation(zeros(2,3,3), size(o)) for i = 1:nimages(img)])

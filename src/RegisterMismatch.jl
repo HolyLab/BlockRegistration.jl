@@ -133,7 +133,7 @@ function mismatch!(mm::MismatchArray, cms::CMStorage, moving::AbstractArray; nor
     # within the boundaries of the SubArray. Use NaN only for pixels
     # truly lacking data.
     checksize_maxshift(mm, cms.maxshift)
-    safe_get!(cms.padded, data(moving), tuple(cms.getindexes...), convert(eltype(cms), NaN))
+    safe_get!(cms.padded, moving, tuple(cms.getindexes...), convert(eltype(cms), NaN))
     fftnan!(cms.moving, cms.padded, cms.fftfunc!)
     # Compute the mismatch
     f0 = complex(cms.fixed.I0)
@@ -223,8 +223,8 @@ function mismatch_apertures!(mms, fixed, moving, aperture_centers, cms; normaliz
         rng = aperture_range(center, cms.aperture_width)
         # sub throws an error in 0.4 when rng extends outside of
         #    bounds, see julia #10296.
-	fsnip = Base.unsafe_view(data(fixed), rng...)
-        msnip = Base.unsafe_view(data(moving), rng...)
+	fsnip = Base.unsafe_view(fixed, rng...)
+        msnip = Base.unsafe_view(moving, rng...)
         # Perform the calculation
         fillfixed!(cms, fsnip)
         mismatch!(mm, cms, msnip; normalization=normalization)

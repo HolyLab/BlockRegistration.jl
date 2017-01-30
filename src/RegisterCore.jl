@@ -414,11 +414,10 @@ You may optionally specify the element type of the result, which for
 `Integer` or `FixedPoint` inputs defaults to `Float32`.
 """
 function highpass{T}(::Type{T}, data::AbstractArray, sigma)
-    sigmav = [sigma...]
-    if any(isinf(sigmav))
+    if any(isinf, sigma)
         datahp = convert(Array{T,ndims(data)}, data)
     else
-        datahp = data - imfilter_gaussian(data, sigmav, astype=T)
+        datahp = data - imfilter(T, data, KernelFactors.IIRGaussian(T, (sigma...,)))
     end
     datahp[datahp .< 0] = 0  # truncate anything below 0
     datahp
