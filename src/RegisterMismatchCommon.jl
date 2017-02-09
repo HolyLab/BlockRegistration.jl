@@ -15,7 +15,7 @@ mismatch_apertures(fixed::AbstractArray, moving::AbstractArray, args...; kwargs.
 
 function mismatch_apertures{T}(::Type{T}, fixed::AbstractArray, moving::AbstractArray, gridsize::DimsLike, maxshift::DimsLike; kwargs...)
     cs = coords_spatial(fixed)
-    aperture_centers = aperture_grid(size(fixed)[cs], gridsize)
+    aperture_centers = aperture_grid(size(fixed, cs...), gridsize)
     aperture_width = default_aperture_width(fixed, gridsize)
     mismatch_apertures(T, fixed, moving, aperture_centers, aperture_width, maxshift; kwargs...)
 end
@@ -275,7 +275,7 @@ function default_aperture_width(img, gridsize::DimsLike, overlap::DimsLike = zer
     end
     gsz1 = max(1,[gridsize...].-1)
     gflag = [gridsize...].>1
-    tuple((([size(img)[sc]...]-gflag)./gsz1+2*[overlap...].*gflag)...)
+    tuple((([size(img, sc...)...]-gflag)./gsz1+2*[overlap...].*gflag)...)
 end
 
 """
@@ -362,7 +362,7 @@ function issamesize(A::AbstractArray, B::AbstractArray)
     n = ndims(A)
     ndims(B) == n || return false
     for i = 1:n
-        size(A, i) == size(B, i) || return false
+        indices(A, i) == indices(B, i) || return false
     end
     true
 end

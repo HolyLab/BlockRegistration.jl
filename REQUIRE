@@ -14,3 +14,4 @@ JLD
 Reexport
 ForwardDiff 0.2.0
 ProgressMeter
+AxisArrays

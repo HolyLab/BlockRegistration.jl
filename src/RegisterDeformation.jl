@@ -437,7 +437,7 @@ unaffected.
 """
 function translate(A::AbstractArray, displacement::DimsLike)
     disp = zeros(Int, ndims(A))
-    disp[coords_spatial(A)] = displacement
+    disp[[coords_spatial(A)...]] = displacement
     indx = UnitRange{Int}[ (1:size(A,i))+disp[i] for i = 1:ndims(A) ]
     get(A, indx, NaN)
 end
@@ -538,7 +538,7 @@ nimages(img)`.
 """
 function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, ϕs; nworkers=1)
     n = nimages(img)
-    ssz = size(img)[coords_spatial(img)]
+    ssz = size(img, coords_spatial(img)...)
     if n == 1
         ϕ = extract1(ϕs, sdims(img), ssz)
         destarray = Array(T, ssz)
@@ -553,7 +553,7 @@ function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, ϕ
     destarray = Array(T, ssz)
     @showprogress 1 "Stacks:" for i = 1:n
         ϕ = extracti(ϕs, i, ssz)
-        warp!(destarray, view(img, "t", i), ϕ)
+        warp!(destarray, view(img, timeaxis(img)(i)), ϕ)
         warp_write(dest, destarray, i)
     end
     nothing
@@ -566,7 +566,7 @@ warp!(dest::Union{HDF5Dataset,JLD.JldDataset}, img, u; nworkers=1) =
 
 function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     n = nimages(img)
-    ssz = size(img)[coords_spatial(img)]
+    ssz = size(img, coords_spatial(img)...)
     wpids = addprocs(nworkers)
     simg = Array(Any, 0)
     swarped = Array(Any, 0)
@@ -590,7 +590,7 @@ function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
             @async begin
                 while (idx = getnextidx()) <= n
                     ϕ = extracti(ϕs, idx, ssz)
-                    copy!(src, view(img, "t", idx))
+                    copy!(src, view(img, timeaxis(img)(idx)))
                     remotecall_fetch(warp!, p, warped, src, ϕ)
                     put!(writing_mutex, true)
                     warp_write(dest, warped, idx)
@@ -702,7 +702,7 @@ function tinterpolate(ϕsindex, tindex, nstack)
 end
 
 # TODO?: do we need to return real values beyond-the-edge for a SubArray?
-to_etp(img) = extrapolate(interpolate(data(img), BSpline(Linear()), OnGrid()), convert(promote_type(eltype(img), Float32), NaN))
+to_etp(img) = extrapolate(interpolate(img, BSpline(Linear()), OnGrid()), convert(promote_type(eltype(img), Float32), NaN))
 
 to_etp(itp::AbstractInterpolation) = extrapolate(itp, convert(promote_type(eltype(itp), Float32), NaN))
 
