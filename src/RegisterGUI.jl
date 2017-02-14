@@ -1,7 +1,9 @@
 module RegisterGUI
 
-using Images, ImagePlayer, Gtk, Colors, Graphics
+using Images, Gtk, Colors, Graphics, MappedArrays
 using RegisterCore, CenterIndexedArrays
+import ImagePlayer
+using ImagePlayer.imshow
 
 # export selectbb3, showoverlay, displayblocks, displaymismatch
 export showoverlay, displaymismatch
@@ -63,8 +65,9 @@ function showoverlay(img1, img2; clim = (0,1), kwargs...)
     if isa(clim[1], Number)
         clim = (clim,clim)
     end
-    ovr = OverlayImage((img1,img2), (RGB(1,0,1),RGB(0,1,0)), clim)
-    view(ovr; kwargs...)
+    imgsc = scaleimages((img1, img2), clim)
+    ovr = colorview(RGB, imgsc[1], imgsc[2], zeroarray)
+    imshow(ovr; kwargs...)
 end
 
 function showoverlay(img1, img2, img3; clim = (0,1), kwargs...)
@@ -74,8 +77,13 @@ function showoverlay(img1, img2, img3; clim = (0,1), kwargs...)
     if isa(clim[1], Number)
         clim = (clim,clim,clim)
     end
-    ovr = OverlayImage((img1,img2,img3), (RGB(1,0,0),RGB(0,1,0),RGB(0,0,1)), clim)
-    view(ovr; kwargs...)
+    imgsc = scaleimages((img1, img2, img3), clim)
+    ovr = colorview(RGB, imgsc[1], imgsc[2], imgsc[3])
+    imshow(ovr; kwargs...)
+end
+
+function scaleimages(imgs, clims)
+    map((img,cl)->mappedarray(x->clamp01nan(scaleminmax(cl...)(x)), img), imgs, clims)
 end
 
 # function displayblocks(gridsize, maxshift, fixed, moving = nothing; blocksize = RegisterMismatch.defaultblocksize(fixed, gridsize), clim = nothing)
@@ -155,7 +163,7 @@ function displaymismatch(mms; thresh = 0, totaldenom::Bool = false, clim=:shared
         else
             cl = clim
         end
-        view(cgrid[i,j], r.data, clim=cl)#, pixelspacing=[1,1])
+        imshow(cgrid[i,j], r.data, clim=cl)#, pixelspacing=[1,1])
         # if umin != nothing
         #     tmpy,tmpx = getyx(umin,i,center)
         # else
