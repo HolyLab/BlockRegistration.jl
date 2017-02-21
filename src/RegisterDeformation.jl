@@ -451,7 +451,7 @@ array "spins" around its center.  The array of grid points defining `ϕ` has
 size specified by `gridsize`.  The dimensionality of `tform` must
 match that specified by `arraysize` and `gridsize`.
 """
-function tform2deformation{T,N}(tform::AffineTransform{T,N}, arraysize, gridsize)
+function tform2deformation{T,Tv,N}(tform::AffineTransform{T,Tv,N}, arraysize, gridsize)
     if length(arraysize) != N || length(gridsize) != N
         error("Dimensionality mismatch")
     end
