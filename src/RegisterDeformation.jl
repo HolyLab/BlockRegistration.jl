@@ -299,8 +299,8 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(
     out = _compose(u, unew, x, 1)
     ucomp = similar(u, typeof(out))
     TG = Mat{N,N,eltype(out)}
-    g = Array(TG, size(u))
-    gtmp = Array(typeof(out), N)
+    g = Array{TG}(size(u))
+    gtmp = Vector{typeof(out)}(N)
     eyeN = eye(TG)
     for I in CartesianRange(sz)
         x = knot(knots, I)
@@ -322,10 +322,10 @@ function medfilt{D<:AbstractDeformation}(ϕs::AbstractVector{D}, n)
     nhalf = n>>1
     2nhalf+1 == n || error("filter size must be odd")
     T = eltype(eltype(D))
-    v = Array(T, ndims(D), n)
+    v = Array{T}(ndims(D), n)
     vs = ntuple(d->view(v, d, :), ndims(D))
     ϕ1 = copy(ϕs[1])
-    ϕout = Array(typeof(ϕ1), length(ϕs))
+    ϕout = Vector{typeof(ϕ1)}(length(ϕs))
     ϕout[1] = ϕ1
     _medfilt!(ϕout, ϕs, v, vs)  # function barrier due to instability of vs
 end
@@ -333,7 +333,7 @@ end
 @noinline function _medfilt!{N,T}(ϕout, ϕs, v, vs::NTuple{N,T})
     n = size(v,2)
     nhalf = n>>1
-    tmp = Array(eltype(T), N)
+    tmp = Vector{eltype(T)}(N)
     u1 = ϕout[1].u
     for i = 1+nhalf:length(ϕs)-nhalf
         u = similar(u1)
@@ -451,13 +451,13 @@ array "spins" around its center.  The array of grid points defining `ϕ` has
 size specified by `gridsize`.  The dimensionality of `tform` must
 match that specified by `arraysize` and `gridsize`.
 """
-function tform2deformation{T,N}(tform::AffineTransform{T,N}, arraysize, gridsize)
+function tform2deformation{T,Tv,N}(tform::AffineTransform{T,Tv,N}, arraysize, gridsize)
     if length(arraysize) != N || length(gridsize) != N
         error("Dimensionality mismatch")
     end
     A = tform.scalefwd - eye(N)   # this will compute the difference
     ngrid = prod(gridsize)
-    u = Array(T, N, ngrid)
+    u = Matrix{T}(N, ngrid)
     asz = [arraysize...]
     s = (asz.-1)./([gridsize...].-1)
     k = 0
@@ -541,7 +541,7 @@ function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, ϕ
     ssz = size(img, coords_spatial(img)...)
     if n == 1
         ϕ = extract1(ϕs, sdims(img), ssz)
-        destarray = Array(T, ssz)
+        destarray = Array{T}(ssz)
         warp!(destarray, img, ϕ)
         warp_write(dest, destarray)
         return nothing
@@ -550,7 +550,7 @@ function warp!{T}(::Type{T}, dest::Union{IO,HDF5Dataset,JLD.JldDataset}, img, ϕ
     if nworkers > 1
         return _warp!(T, dest, img, ϕs, nworkers)
     end
-    destarray = Array(T, ssz)
+    destarray = Array{T}(ssz)
     @showprogress 1 "Stacks:" for i = 1:n
         ϕ = extracti(ϕs, i, ssz)
         warp!(destarray, view(img, timeaxis(img)(i)), ϕ)
@@ -568,9 +568,9 @@ function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     n = nimages(img)
     ssz = size(img, coords_spatial(img)...)
     wpids = addprocs(nworkers)
-    simg = Array(Any, 0)
-    swarped = Array(Any, 0)
-    rrs = Array{RemoteChannel}(0)
+    simg = Vector{Any}(0)
+    swarped = Vector{Any}(0)
+    rrs = Vector{RemoteChannel}(0)
     mydir = splitdir(@__FILE__)[1]
     for p in wpids
         remotecall_fetch(Main.eval, p, :(push!(LOAD_PATH, $mydir)))
@@ -678,7 +678,7 @@ a deformation defined intermediate times `tindex` . Note that
 `ϕs[tindex] == ϕsindex`.
 """
 function tinterpolate(ϕsindex, tindex, nstack)
-    ϕs = Array(eltype(ϕsindex), nstack)
+    ϕs = Vector{eltype(ϕsindex)}(nstack)
     # Before the first tindex
     k = 0
     for i in 1:tindex[1]-1
@@ -760,7 +760,7 @@ function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u::AbstractArray{T}, sz=tail(si
     if isbits(T)
         uf = reinterpret(Vec{N,T}, u, sz)
     else
-        uf = Array(Vec{N,T}, sz)
+        uf = Array{Vec{N,T}}(sz)
         copy_ctf!(uf, u)
     end
     uf
@@ -781,7 +781,7 @@ function convert_from_fixed{N,T}(uf::AbstractArray{Vec{N,T}}, sz=size(uf))
     if isbits(T) && isa(uf, Array)
         u = reinterpret(T, uf, (N, sz...))
     else
-        u = Array(T, (N, sz...))
+        u = Array{T}(N, sz...)
         for i = 1:length(uf)
             for d = 1:N
                 u[d,i] = uf[i][d]
