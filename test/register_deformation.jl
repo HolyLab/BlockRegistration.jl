@@ -275,13 +275,14 @@ end
 using JLD
 knots = (linspace(1,20,3), linspace(1,30,5))
 ϕ = RegisterDeformation.GridDeformation(rand(2,map(length,knots)...), knots)
-fn = joinpath(tempdir(), "def.jld")
+fn = string(tempname(), ".jld")
 save(fn, "ϕ", ϕ)
 ϕ2 = load(fn, "ϕ")
 @test ϕ2.u == ϕ.u
 @test ϕ2.knots == ϕ.knots
 str = readstring(`h5dump $fn`)
 @test !isempty(search(str, "SIMPLE { ( 5, 3, 2 ) / ( 5, 3, 2 ) }"))
+rm(fn)
 
 # temporal interpolation
 u2 = [1.0 1.0]
