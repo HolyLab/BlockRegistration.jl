@@ -305,3 +305,10 @@ v = ϕsfilt[3].u[2,2]
 v1 = median(vec(u[1,2,2,2:4]))
 v2 = median(vec(u[2,2,2,2:4]))
 @test v[1] == v1 && v[2] == v2
+
+# Ensure there is no conflict between Images and RegisterDeformation
+using BlockRegistration, AffineTransforms, Images
+tform = tformrotate(pi/4)
+ϕ = tform2deformation(tform, (100, 100), (7, 7))
+img = rand(100, 100)
+warp(img, ϕ)
