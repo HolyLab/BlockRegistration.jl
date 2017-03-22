@@ -6,6 +6,7 @@ using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, HDF
 using RegisterUtilities
 using Base: Cartesian, tail
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
+import ImageTransformations: warp, warp!
 
 export
     # types
@@ -475,7 +476,7 @@ end
 `wimg = warp(img, ϕ)` warps the array `img` according to the
 deformation `ϕ`.
 """
-function warp(img, ϕ)
+function warp(img::AbstractArray, ϕ::AbstractDeformation)
     wimg = WarpedArray(img, ϕ)
     dest = similar(img, warp_type(img))
     warp!(dest, wimg)
@@ -510,7 +511,7 @@ end
 `warp!(dest, img, ϕ)` warps `img` using the deformation `ϕ`.  The
 result is stored in `dest`.
 """
-function warp!(dest::AbstractArray, img::AbstractArray, ϕ)
+function warp!(dest::AbstractArray, img::AbstractArray, ϕ::AbstractDeformation)
     wimg = WarpedArray(to_etp(img), ϕ)
     warp!(dest, wimg)
 end
@@ -518,7 +519,7 @@ end
 """
 `warp!(dest, img, tform, ϕ)` warps `img` using a combination of the affine transformation `tform` followed by deformation with `ϕ`.  The result is stored in `dest`.
 """
-function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ϕ)
+function warp!(dest::AbstractArray, img::AbstractArray, A::AffineTransform, ϕ::AbstractDeformation)
     wimg = WarpedArray(to_etp(img, A), ϕ)
     warp!(dest, wimg)
 end
