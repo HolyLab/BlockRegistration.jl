@@ -55,8 +55,14 @@ type CachedInterpolation{T,N,M,O} <: AbstractInterpolation{T,N,BSpline{Quadratic
     tileindex::Int      # equivalent to sub2ind(size(P)[N+1:end], i_1, i_2, ...)
 end
 
-Base.size{T,N}(itp::CachedInterpolation{T,N})    = size(itp.parent)[1:N]
+splitN = Base.IteratorsMD.split
+Base.size{T,N}(itp::CachedInterpolation{T,N})    = splitN(size(itp.parent), Val{N})[1]
 Base.size{T,N}(itp::CachedInterpolation{T,N}, d) = d <= N ? size(itp.parent, d) : 1
+
+Base.indices{T,N,M,O}(itp::CachedInterpolation{T,N,M,O}) =
+    map((x,o)->x-o, splitN(indices(itp.parent), Val{N})[1], O)
+Base.indices{T,N,M,O}(itp::CachedInterpolation{T,N,M,O}, d) =
+    d <= N ? indices(itp.parent, d) - O[d] : Base.OneTo(1)
 
 """
 
@@ -136,6 +142,7 @@ immutable CoefsWrapper{N,A}
     coefs::A
 end
 
+Base.size{N}(itp::CoefsWrapper{N}) = splitN(size(itp.coefs), Val{N})[1]
 Base.size{N}(itp::CoefsWrapper{N}, d) = d <= N ? size(itp.coefs, d) : 1
 
 # FIXME: this function cheats dangerously, because it does _not_
