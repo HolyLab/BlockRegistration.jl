@@ -3,7 +3,7 @@ __precompile__()
 module RegisterOptimize
 
 using MathProgBase, Ipopt, Optim, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers, ProgressMeter
-using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit, CachedInterpolations
+using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit, CachedInterpolations, CenterIndexedArrays
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base: Test, tail
 
@@ -417,6 +417,11 @@ end
 ###
 ### Optimize (via descent) a deformation to mismatch data
 ###
+
+itporder(mmis::Array) = itporder(eltype(mmis))
+itporder{T,N,A}(::Type{CenterIndexedArray{T,N,A}}) = itporder(A)
+itporder{AI<:AbstractInterpolation}(::Type{AI}) = Interpolations.itptype(AI)
+
 """
 `ϕ, fval, fval0 = optimize!(ϕ, ϕ_old, dp, mmis; [tol=1e-6, print_level=0])`
 improves an initial deformation `ϕ` to reduce the mismatch.  The
@@ -429,9 +434,46 @@ true, consider adding `mu_strategy="monotone", mu_init=??` to the
 options (where the value of ?? might require some experimentation; a
 starting point might be 1e-4).  See also `fixed_λ` and `auto_λ`.
 
-Any additional keyword arguments get passed as options to Ipopt.
+For quadratically-interpolated `mmis`, any additional keyword
+arguments get passed as options to Ipopt. For linearly-interpolated
+`mmis`, you can use `stepsize=0.25` to take steps that, for the most
+strongly-shifted deformation coordinate, are 0.25pixel.
 """
-function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; tol=1e-6, print_level=0, kwargs...)
+function optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis; kwargs...)
+    _optimize!(ϕ, ϕ_old, dp, mmis, itporder(mmis); kwargs...)
+end
+
+# If the mismatch is interpolated linearly, we don't have a continuous
+# gradient and therefore can't use the more sophisticated
+# algorithms. In that case we use a subgradient method, using gradient
+# descent with a "constant" step length (using an L1 measure of
+# length). See https://en.wikipedia.org/wiki/Subgradient_method.
+function _optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis, ::Type{BSpline{Linear}}; stepsize=1.0, kwargs...)
+    mxs = maxshift(first(mmis))
+    g = similar(ϕ.u)
+    gview = convert_from_fixed(g)
+    @assert pointer(gview) == pointer(g)
+    p0 = p = penalty!(g, ϕ, ϕ_old, dp, mmis)
+    pold = oftype(p, Inf)
+    while p < pold
+        pold = p
+        gmax = mapreduce(abs, max, gview)
+        if gmax == 0 || !isfinite(gmax)
+            break
+        end
+        s = eltype(gview)(stepsize/gmax)
+        u = ϕ.u .- s .* g
+        uclamp!(u, mxs)
+        ϕ1 = GridDeformation(u, ϕ.knots)
+        p = penalty!(g, ϕ1, ϕ_old, dp, mmis)
+        if p < pold
+            copy!(ϕ.u, u)
+        end
+    end
+    ϕ, pold, p0
+end
+
+function _optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis, T::Type; tol=1e-6, print_level=0, kwargs...)
     objective = DeformOpt(ϕ, ϕ_old, dp, mmis)
     _optimize!(objective, ϕ, dp, mmis, tol, print_level; kwargs...)
 end

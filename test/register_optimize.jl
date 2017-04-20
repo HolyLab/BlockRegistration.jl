@@ -1,6 +1,6 @@
 using FixedSizeArrays, AffineTransforms, Interpolations, Base.Test
 import BlockRegistration, RegisterOptimize
-using RegisterCore, RegisterPenalty, RegisterDeformation
+using RegisterCore, RegisterPenalty, RegisterDeformation, RegisterMismatch, RegisterFit
 
 using RegisterTestUtilities
 
@@ -262,7 +262,7 @@ for I in eachindex(nums)
 end
 denom = ones(m, n)
 mms = mismatcharrays(nums, denom)
-mmis = interpolate_mm!(mms; BC=InPlaceQ())
+mmis = interpolate_mm!(mms, Quadratic(InPlaceQ()))
 
 u = randn(2, gridsize...)
 RegisterFit.uclamp!(u, (m>>1, n>>1))
@@ -297,4 +297,29 @@ for (u, val) in ((ϕs[1].u, target[:,1]),
     for uv in u
         @test_approx_eq_eps uv val 1e-2  # look into why this is so low
     end
+end
+
+# Optimization with linear interpolation of mismatch data
+fixed = 1:8
+moving = fixed + 1
+knots = (linspace(1,8,3),)
+aperture_centers = [(1.0,), (4.5,), (8.0,)]
+aperture_width = (3.5,)
+mxshift = (2,)
+gridsize = map(length, knots)
+mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift; normalization=:pixels)
+E0 = zeros(size(mms))
+cs = Array(Any, size(mms))
+Qs = Array(Any, size(mms))
+thresh = length(fixed)/prod(gridsize)/4
+for i = 1:length(mms)
+    E0[i], cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)
+end
+mmis = interpolate_mm!(mms, Linear())
+λ = 0.001
+ap = AffinePenalty{Float64,ndims(fixed)}(knots, λ)
+ϕ, mismatch = RegisterOptimize.fixed_λ(cs, Qs, knots, ap, mmis)
+@test mismatch < 1e-4
+for i = 1:3
+    @test -1.01 <= ϕ.u[i][1] <= -0.99
 end
