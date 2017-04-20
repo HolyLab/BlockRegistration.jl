@@ -111,6 +111,16 @@ for I in eachindex(u)
     @test_approx_eq_eps u[I] cs[I] 1e-3
     @test_approx_eq_eps ux[I] cs[I] 1e-3
 end
+# Ensure that λ=0 gives the right initialization
+knots0 = (linspace(1,3,3),)
+ap0 = AffinePenalty(knots0, 0.0)
+cs0 = Any[[17.0], [-44.0], [12.0]] # Vector{Float64}[[17.0], [-44.0], [12.0]]
+Qs0 = [reshape([1], 1, 1) for i = 1:3]
+u0, isconverged = @inferred(RegisterOptimize.initial_deformation(ap0, cs0, Qs0))
+@test isconverged
+@test u0[1] == [17.0]
+@test u0[2] == [-44.0]
+@test u0[3] == [12.0]
 
 # Random initialization
 for I in CartesianRange(gridsize)
