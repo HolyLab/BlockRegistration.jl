@@ -857,7 +857,7 @@ end
 
 function vec2vecϕ{T,N}(Qs::Array{Mat{N,N,T}}, x::AbstractVector{T})
     xf = convert_to_fixed(Vec{N,T}, x, size(Qs))
-    _vec2vecϕ(xf, size(Qs)[1:end-1])
+    _vec2vecϕ(xf, Base.front(size(Qs)))
 end
 
 @noinline function _vec2vecϕ{N}(x::AbstractArray, sz::NTuple{N,Int})
