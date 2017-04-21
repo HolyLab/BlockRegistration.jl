@@ -55,7 +55,7 @@ type CachedInterpolation{T,N,M,O} <: AbstractInterpolation{T,N,BSpline{Quadratic
     tileindex::Int      # equivalent to sub2ind(size(P)[N+1:end], i_1, i_2, ...)
 end
 
-splitN = Base.IteratorsMD.split
+const splitN = Base.IteratorsMD.split
 Base.size{T,N}(itp::CachedInterpolation{T,N})    = splitN(size(itp.parent), Val{N})[1]
 Base.size{T,N}(itp::CachedInterpolation{T,N}, d) = d <= N ? size(itp.parent, d) : 1
 

@@ -126,8 +126,10 @@ end
 function _penalty!{T,N}(gs, ϕs, ϕs_old, dp::DeformationPenalty{T,N}, mmis, keeps, i)
     colons = ntuple(ColonFun, Val{N})
     indexes = (colons..., i)
-    mmi = view(mmis, indexes...)
-    keep = view(keeps, indexes...)
+    #mmi = view(mmis, indexes...)  # making these views runs afoul of inference limits
+    mmi = mmis[indexes...]
+    #keep = view(keeps, indexes...)
+    keep = keeps[indexes...]
     calc_gradient = gs != nothing && !isempty(gs)
     g = calc_gradient ? view(gs, indexes...) : nothing
     if isa(ϕs_old, AbstractVector)
@@ -398,6 +400,11 @@ function penalty!{D<:GridDeformation}(g, λt::Real, ϕs::Vector{D})
     end
     s
 end
+# Not needed on Julia 0.6, but on 0.5 this eliminates a bottleneck due to bad codegen
+Base.sumabs2{N,T}(v::Vec{N,T}) = _sumabs2(v.values)
+@inline _sumabs2(t) = (x = t[1]; __sumabs2(x*x, Base.tail(t)...))
+@inline __sumabs2(s, x, t...) = __sumabs2(s + x*x, t...)
+__sumabs2(s) = s
 
 function penalty!{T<:Number, D<:GridDeformation}(g::Array{T}, λt::Real, ϕs::Vector{D})
     N = ndims(first(ϕs))
