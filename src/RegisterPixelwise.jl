@@ -70,6 +70,21 @@ replace_expr!(obj, pat, rep) = obj
 
 function penalty_pixelwise{T<:Real}(U::AbstractArray{T}, itp, knots, ap::AffinePenalty, fixed, moving)
     size(U, 1) == ndims(fixed) || throw(DimensionMismatch("size(U) = $(size(U)), which disagrees with an $(ndims(fixed))-dimensional image"))
+    convert(T, penalty_pixelwise_reg(U, ap) +
+               penalty_pixelwise_data(U, itp, knots, fixed, moving))
+end
+
+# For comparison of two deformations
+function penalty_pixelwise{T<:Real}(U1::AbstractArray{T}, U2::AbstractArray{T},
+                                    itp, knots, ap::AffinePenalty, fixed, moving)
+    indices(U1) == indices(U2) || throw(DimensionMismatch("The indices of the two deformations must match, got $(indices(U1)) and $(indices(U2))"))
+    size(U1, 1) == ndims(fixed) || throw(DimensionMismatch("size(U1) = $(size(U1)), which disagrees with an $(ndims(fixed))-dimensional image"))
+    rp1, rp2 = penalty_pixelwise_reg(U1, ap), penalty_pixelwise_reg(U2, ap)
+    dp1, dp2 = penalty_pixelwise_data(U1, U2, itp, knots, fixed, moving)
+    convert(T, rp1+dp1), convert(T, rp2+dp2)
+end
+
+function penalty_pixelwise_reg(U, ap)
     # The regularization penalty. We apply this to the interpolation
     # coefficients rather than the on-grid values. This may be
     # cheating. It also requires InPlace() so that the sizes match.
@@ -78,9 +93,7 @@ function penalty_pixelwise{T<:Real}(U::AbstractArray{T}, itp, knots, ap::AffineP
     F, λ = ap.F, ap.λ
     A = (X*F)*F'
     dX = X-A
-    val = (λ/n) * sumabs2(dX)
-    # Combine with the data penalty
-    convert(T, val + penalty_pixelwise_data(U, itp, knots, fixed, moving))
+    (λ/n) * sumabs2(dX)
 end
 
 @generated function penalty_pixelwise_data{T<:Real,_,N}(U::AbstractArray{T},
@@ -111,6 +124,40 @@ end
     end
 end
 
+@generated function penalty_pixelwise_data{T<:Real,_,N}(U1::AbstractArray{T},
+                                                        U2::AbstractArray{T},
+                                                        itp,
+                                                        knots::NTuple{N,Range},
+                                                        fixed::AbstractArray{_,N},
+                                                        moving)
+    uindexes = [:((I[$d]-offsets[$d])/steps[$d] + 1) for d = 1:N]
+    ϕ1xindexes = [:(I[$d] + u1[$d]) for d = 1:N]
+    ϕ2xindexes = [:(I[$d] + u2[$d]) for d = 1:N]
+    quote
+        steps = map(step, knots)
+        offsets = map(first, knots)
+        valid = 0
+        mm1 = mm2 = 0.0
+        for I in CartesianRange(indices(fixed))
+            fval = fixed[I]
+            if isfinite(fval)
+                u1 = deformation_coords(U1, itp, $(uindexes...))
+                u2 = deformation_coords(U2, itp, $(uindexes...))
+                mval1 = moving[$(ϕ1xindexes...)]
+                mval2 = moving[$(ϕ2xindexes...)]
+                if isfinite(mval1) && isfinite(mval2)
+                    valid += 1
+                    diff = float64(fval)-float64(mval1)
+                    mm1 += diff^2
+                    diff = float64(fval)-float64(mval2)
+                    mm2 += diff^2
+                end
+            end
+        end
+        mm1/valid, mm2/valid
+    end
+end
+
 function optimize_pixelwise!(ϕ::InterpolatingDeformation, dp::DeformationPenalty, fixed, moving::AbstractExtrapolation; stepsize = 1.0)
     # Optimize the interpolation coefficients, rather than the values
     # of the deformation at the grid points
@@ -119,14 +166,13 @@ function optimize_pixelwise!(ϕ::InterpolatingDeformation, dp::DeformationPenalt
     @assert pointer(U) == pointer(itp.coefs)
     g = similar(U)
     objective = x->penalty_pixelwise(x, itp, ϕ.knots, dp, fixed, moving)
+    objective2 = (x,y)->penalty_pixelwise(x, y, itp, ϕ.knots, dp, fixed, moving)
     # f_tape = GradientTape(objective, (copy(U),))
     # compiled_f_tape = compile(f_tape)
     # ∇objective!(results, x) = ReverseDiff.gradient!(results, compiled_f_tape, x)
     ∇objective!(results, x) = ForwardDiff.gradient!(results, objective, x)
-    p0 = p = objective(U)
-    pold = oftype(p, Inf)
-    while p < pold
-        pold = p
+    pold = p0 = objective(U)
+    while true
         ∇objective!(g, U)
         gmax = mapreduce(abs, max, g)
         if gmax == 0 || !isfinite(gmax)
@@ -134,10 +180,11 @@ function optimize_pixelwise!(ϕ::InterpolatingDeformation, dp::DeformationPenalt
         end
         s = eltype(g)(stepsize/gmax)
         Utrial = U .- s .* g
-        p = objective(Utrial)
-        if p < pold
-            copy!(U, Utrial)
+        p, pold = objective2(Utrial, U)
+        if p >= pold
+            break
         end
+        copy!(U, Utrial)
     end
     ϕ, pold, p0
 end
