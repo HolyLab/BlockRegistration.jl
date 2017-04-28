@@ -439,22 +439,36 @@ function vec2ϕs{T,N}(x::Array{T}, gridsize::NTuple{N,Int}, n, knots)
 end
 
 """
-`mmi = interpolate_mm!(mm)` prepares a MismatchArray (returned by,
-e.g., RegisterMismatch) for sub-pixel interpolation.  The original
-data are "destroyed," in the sense that the values are changed into
-quadratic interpolation coefficients.
+    mmi = interpolate_mm!(mm, order=Quadratic)
 
-`mmis = interpolate_mm!(mms)` prepares the array-of-MismatchArrays
+Prepare a MismatchArray (returned by, e.g., RegisterMismatch) for
+sub-pixel interpolation.  `order` is either `Linear` or `Quadratic`
+from Interpolations.jl; with `Quadratic`, the original data are
+"destroyed," in the sense that the values are changed into quadratic
+interpolation coefficients. It can also be `Quadratic(InPlaceQ())` if
+you want to specify the boundary condition (default is `InPlace()`).
+
+`mmis = interpolate_mm!(mms, order)` prepares the array-of-MismatchArrays
 `mms` for interpolation.
 """
-function interpolate_mm!{T<:MismatchArray}(mms::AbstractArray{T}; BC=InPlace())
-    f = x->CenterIndexedArray(interpolate!(x.data, BSpline(Quadratic(BC)), OnCell()))
+function interpolate_mm!{T<:MismatchArray}(mms::AbstractArray{T}, spline::Interpolations.Degree)
+    f = x->CenterIndexedArray(interpolate!(x.data, BSpline(spline), gridstyle(spline)))
     map(f, mms)
 end
 
-function interpolate_mm!(mm::MismatchArray; BC=InPlace())
-    CenterIndexedArray(interpolate!(mm.data, BSpline(Quadratic(BC)), OnCell()))
+function interpolate_mm!(mm::MismatchArray, spline::Interpolations.Degree)
+    CenterIndexedArray(interpolate!(mm.data, BSpline(spline), gridstyle(spline)))
 end
+
+interpolate_mm!{order<:Interpolations.Degree}(arg, ::Type{order}) =
+    interpolate_mm!(arg, itporder(order))
+
+interpolate_mm!(arg) = interpolate_mm!(arg, Quadratic)
+
+itporder(::Type{Quadratic}) = Quadratic(InPlace())
+itporder(::Type{Linear}) = Linear()
+gridstyle(::Quadratic) = OnCell()
+gridstyle(::Linear) = OnGrid()
 
 @generated function Interpolations.gradient!{T,N}(g::AbstractVector, A::CenterIndexedArray{T,N}, i::Number...)
     length(i) == N || error("Must use $N indexes")

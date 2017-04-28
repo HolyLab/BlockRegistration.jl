@@ -16,4 +16,4 @@ addons:
 script:
   - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
   - julia -e 'Pkg.clone(pwd()); Pkg.build("BlockRegistration")'
-  - julia -e 'Pkg.test("BlockRegistration")'
+  - julia -e 'cd(Pkg.dir("BlockRegistration","test")); use_cuda=false; include("runtests.jl")'

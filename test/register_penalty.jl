@@ -82,7 +82,7 @@ p = [(x-1.75)^2 for x = 1:7]
 nums = reshape(p*p', length(p), length(p))
 denoms = similar(nums); fill!(denoms, 1)
 mm = MismatchArray(nums, denoms)
-mmi = RP.interpolate_mm!(mm; BC=InPlaceQ())
+mmi = RP.interpolate_mm!(mm, Quadratic(InPlaceQ()))
 mmi_array = typeof(mmi)[mmi]
 ϕ = GridDeformation(zeros(2, 1, 1), imgsize)
 g = similar(ϕ.u)
@@ -115,7 +115,7 @@ for j = 1:gridsize[2], i = 1:gridsize[1]
 end
 denom = ones(nums[1,1])
 mms = mismatcharrays(nums, denom)
-mmis = RP.interpolate_mm!(mms; BC=Interpolations.InPlaceQ())
+mmis = RP.interpolate_mm!(mms, Quadratic(InPlaceQ()))
 u_real = (dr.*rand(2, gridsize...).+minrange) .- Float64[m+1 for m in maxshift]  #zeros(size(c)...)
 ϕ = GridDeformation(u_real, imgsize)
 g = similar(ϕ.u)
@@ -157,7 +157,7 @@ for nd = 1:3
         nums[I] = n
     end
     mms = mismatcharrays(nums, fill(1.0, size(first(nums))))
-    mmis = RP.interpolate_mm!(mms; BC=Interpolations.InPlaceQ())
+    mmis = RP.interpolate_mm!(mms, Quadratic(InPlaceQ()))
 
     # If we start right at the minimum, and there is no volume
     # penalty, the value should be zero
