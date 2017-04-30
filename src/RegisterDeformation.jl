@@ -19,6 +19,7 @@ export
     eachknot,
     griddeformations,
     medfilt,
+    regrid,
     tform2deformation,
     tinterpolate,
     translate,
@@ -105,6 +106,8 @@ immutable GridDeformation{T,N,A<:AbstractArray,L} <: AbstractDeformation{T,N}
         new(u, u.ranges)
     end
 end
+
+typealias InterpolatingDeformation{T,N,A<:AbstractInterpolation} GridDeformation{T,N,A}
 
 # Ambiguity avoidance
 function GridDeformation{FV<:FixedVector,N}(u::AbstractArray{FV,N},
@@ -277,6 +280,28 @@ function Base.next(ki::KnotIterator, state)
     k = knot(ki.knots, I)
     k, state
 end
+
+"""
+    ϕnew = regrid(ϕ, gridsize)
+
+Reparametrize the deformation `ϕ` so that it has a grid size `gridsize`.
+
+# Example
+
+```
+ϕnew = regrid(ϕ, (13,11,7))
+```
+for a 3-dimensional deformation `ϕ`.
+"""
+function regrid{T,N}(ϕ::InterpolatingDeformation{T,N}, sz::Dims{N})
+    knots_new = map((r,n)->linspace(first(r), last(r), n), ϕ.knots, sz)
+    u = Array{Vec{N,T},N}(sz)
+    for (i, k) in enumerate(eachknot(knots_new))
+        u[i] = ϕ.u[k.values...]
+    end
+    GridDeformation(u, knots_new)
+end
+regrid{T,N}(ϕ::GridDeformation{T,N}, sz::Dims{N}) = regrid(interpolate(ϕ), sz)
 
 """
 `ϕ_c = ϕ_old(ϕ_new)` computes the composition of two deformations,

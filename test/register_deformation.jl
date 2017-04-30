@@ -306,9 +306,30 @@ v1 = median(vec(u[1,2,2,2:4]))
 v2 = median(vec(u[2,2,2,2:4]))
 @test v[1] == v1 && v[2] == v2
 
+z = [(x-2.5)^2 for x = 0:5]
+uold = zeros(2,6,6)
+uold[1,:,:] = z .* ones(6)'
+uold[2,:,:] = ones(6) .* z'
+knots = (linspace(1,20,6), linspace(1,30,6))
+ϕ = RegisterDeformation.GridDeformation(uold, knots)
+ϕnew = RegisterDeformation.regrid(ϕ, (10,8))
+@test ϕnew.knots[1] ≈ linspace(1,20,10)
+@test ϕnew.knots[2] ≈ linspace(1,30,8)
+ϕi = interpolate(ϕ)
+for (iy,y) in enumerate(linspace(1,30,8))
+    ys = (y-1)*5/29
+    for (ix,x) in enumerate(linspace(1,20,10))
+        xs = (x-1)*5/19
+        @test ≈(ϕnew.u[ix,iy], [(xs-2.5)^2,(ys-2.5)^2], rtol=0.2)
+        @test ϕnew.u[ix,iy] ≈ ϕi.u[x,y]
+    end
+end
+
 # Ensure there is no conflict between Images and RegisterDeformation
 using BlockRegistration, AffineTransforms, Images
 tform = tformrotate(pi/4)
 ϕ = tform2deformation(tform, (100, 100), (7, 7))
 img = rand(100, 100)
 warp(img, ϕ)
+
+nothing
