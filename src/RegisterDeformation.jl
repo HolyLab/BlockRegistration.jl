@@ -18,6 +18,7 @@ export
     compose,
     eachknot,
     griddeformations,
+    knotgrid,
     medfilt,
     regrid,
     tform2deformation,
@@ -668,24 +669,58 @@ checkϕdims{D<:AbstractDeformation}(ϕs::Vector{D}, N, n) = length(ϕs) == n || 
 
 
 """
-`img = warpgrid(ϕ; [scale=1, showidentity=false])` returns an image
-`img` that permits visualization of the deformation `ϕ`.  The output
-is a warped rectangular grid with nodes centered on the control points
-as specified by the knots of `ϕ`.
+    img = knotgrid(T, knots)
+    img = knotgrid(knots)
+    img = knotgrid([T], ϕ)
+
+Returns an image `img` which has value 1 at points that are "on the
+knots."  If `knots`/`ϕ` is two-dimensional, the image will
+consist of grid lines; for three-dimensional inputs, the image will
+have grid planes.
+
+The meaning of "on the knots" is that `x[d] == knots[d][i]` for some
+dimension `d` and knot index `i`. An exception is made for the edge
+values, which are brought inward by one pixel to prevent complete loss
+under subpixel deformations.
+
+Optionally specify the element type `T` of `img`.
+
+See also [`warpgrid`](@ref).
+"""
+function knotgrid{T,N}(::Type{T}, knots::NTuple{N,Range})
+    @assert all(r->first(r)==1, knots)
+    inds = map(r->Base.OneTo(ceil(Int, last(r))), knots)
+    img = Array{T}(map(length, inds))
+    fill!(img, zero(T))
+    for idim = 1:N
+        indexes = Any[inds...]
+        indexes[idim] = clamp(round(Int, knots[idim]), first(inds[idim])+1, last(inds[idim])-1)
+        img[indexes...] = one(T)
+    end
+    img
+end
+knotgrid{T}(::Type{T}, ϕ::GridDeformation) = knotgrid(T, ϕ.knots)
+knotgrid(arg) = knotgrid(Bool, arg)
+
+
+"""
+    img = warpgrid(ϕ; [scale=1, showidentity=false])
+
+Returns an image `img` that permits visualization of the deformation
+`ϕ`.  The output is a warped rectangular grid with nodes centered on
+the control points as specified by the knots of `ϕ`.  If `ϕ` is a
+two-dimensional deformation, the image will consist of grid lines; for
+a three-dimensional deformation, the image will have grid planes.
 
 `scale` multiplies `ϕ.u`, effectively making the deformation stronger
 (for `scale > 1`).  This can be useful if you are trying to visualize
-subtle changes. If `showidentity` is `true`, the actual deformation is
+subtle changes. If `showidentity` is `true`, an RGB image is returned
+that has the warped grid in magenta and the original grid in green.
+
+See also [`knotgrid`](@ref).
 """
 function warpgrid(ϕ; scale=1, showidentity::Bool=false)
-    imsz = map(x->convert(Int, last(x)), ϕ.knots)
-    img = zeros(Float32, imsz)
-    imsza = Any[imsz...]
-    for idim = 1:ndims(img)
-        indexes = map(s -> 1:s, imsza)
-        indexes[idim] = clamp(round(Int, ϕ.knots[idim]), 2, imsz[idim]-1)
-        img[indexes...] = 1
-    end
+    img = knotgrid(ϕ)
     if scale != 1
         ϕ = GridDeformation(scale*ϕ.u, ϕ.knots)
     end

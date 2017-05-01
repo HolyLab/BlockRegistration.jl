@@ -222,6 +222,13 @@ compare_g(g, gj, gridsize)
 knots = (linspace(1,100,4), linspace(1,100,3))
 gridsize = map(length, knots)
 ϕ = RegisterDeformation.GridDeformation(5*randn(2,gridsize...), knots)
+kg = RegisterDeformation.knotgrid(knots)
+@test eltype(kg) == Bool
+@test size(kg) == (100, 100)
+kg2 = RegisterDeformation.knotgrid(ϕ)
+@test kg2 == kg
+kg = RegisterDeformation.knotgrid(Float64, knots)
+@test eltype(kg) == Float64
 A = RegisterDeformation.warpgrid(ϕ)
 B = RegisterDeformation.warpgrid(ϕ, scale=1.5)
 @test A != B
