@@ -58,12 +58,13 @@ end
     IT = Interpolations.itptype(A)
     uindexes = scaledindexes(IT, N)
     ϕxindexes = [:(I[$d] + u[$d]) for d = 1:N]
+    out_type = promote_type(T1, T2, eltype(eltype(A)))
     quote
         knots = ϕ.knots
         steps = map(step, knots)
         offsets = map(first, knots)
         valid = 0
-        mm = 0.0
+        mm = zero($(out_type))
         for I in CartesianRange(indices(fixed))
             fval = fixed[I]
             if isfinite(fval)
@@ -71,7 +72,7 @@ end
                 mval = moving[$(ϕxindexes...)]
                 if isfinite(mval)
                     valid += 1
-                    diff = float64(fval)-float64(mval)
+                    diff = $(out_type)(fval)-$(out_type)(mval)
                     mm += diff^2
                 end
             end
