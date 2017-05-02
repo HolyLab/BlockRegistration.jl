@@ -116,7 +116,8 @@ function penalty_pixelwise_data!_gen{IT}(N, ::Type{IT}, Pad)
         steps = map(step, knots)
         offsets = map(first, knots)
         valid = 0
-        mm = 0.0
+        out_type = promote_type(eltype(moving.itp.coefs), eltype(eltype(g)))
+        mm = zero(out_type)
         gimg = gradient(moving.itp, map(first, indices(moving))...)
         GT = eltype(eltype(g))
         for I in CartesianRange(indices(fixed))
@@ -132,7 +133,7 @@ function penalty_pixelwise_data!_gen{IT}(N, ::Type{IT}, Pad)
                 mval = moving[$(ϕxindexes...)]
                 if isfinite(mval)
                     valid += 1
-                    diff = float64(fval)-float64(mval)
+                    diff = out_type(fval)-out_type(mval)
                     mm += abs2(diff)
                     # For the elements of the gradient we use the
                     # chain rule, and thus need the spatial gradient
