@@ -50,44 +50,39 @@ end
 #fill each real-valued component of g with the respective gradient entry
 #temporarily sets the epsilon components of g to compute the gradient
 function dualgrad_data!(g, ϕ, fixed, moving)
+    ur = RegisterDeformation.convert_from_fixed(ϕ.u.itp.coefs)
+    gr = RegisterDeformation.convert_from_fixed(g)
+    nd = size(ur, 1)
     for i in eachindex(ϕ.u.itp.coefs)
-        cur_input = Array(ϕ.u.itp.coefs[i])
-        cur_output = Array(g[i])
-        for j = 1:length(cur_input)
-            temp = cur_input[j]
-            cur_input[j] = dual(value(temp), 1.0)
-            ϕ.u.itp.coefs[i] = Vec(cur_input)
-            cur_output[j] = epsilon(RegisterPixelwise.penalty_pixelwise_data(ϕ, fixed, moving))
-            cur_input[j] = temp
+        for j = 1:nd
+            temp = ur[j, i]
+            ur[j, i] = dual(value(temp), 1.0)
+            gr[j, i] = epsilon(RegisterPixelwise.penalty_pixelwise_data(ϕ, fixed, moving))
+            ur[j, i] = temp
         end
-        g[i] = Vec(cur_output)
-        ϕ.u.itp.coefs[i] = Vec(cur_input)
     end
 end
 
 function dualgrad_reg!(g, ap, ϕ)
+    ur = RegisterDeformation.convert_from_fixed(ϕ.u.itp.coefs)
+    gr = RegisterDeformation.convert_from_fixed(g)
+    nd = size(ur, 1)
     for i in eachindex(ϕ.u.itp.coefs)
-        cur_input = Array(ϕ.u.itp.coefs[i])
-        cur_output = Array(g[i])
-        for j = 1:length(cur_input)
-            temp = cur_input[j]
-            cur_input[j] = dual(value(temp), 1.0)
-            ϕ.u.itp.coefs[i] = Vec(cur_input)
-            cur_output[j] = epsilon(RegisterPixelwise.penalty_pixelwise_reg(ap, ϕ))
-            cur_input[j] = temp
+        for j = 1:nd
+            temp = ur[j, i]
+            ur[j, i] = dual(value(temp), 1.0)
+            gr[j, i] = epsilon(RegisterPixelwise.penalty_pixelwise_reg(ap, ϕ))
+            ur[j, i] = temp
         end
-        g[i] = Vec(cur_output)
-        ϕ.u.itp.coefs[i] = Vec(cur_input)
     end
 end
 
 
 function test_pixelwise(fixed, moving, ϕ0, ap)
     print("Beginning new test run\n")
-    ϕ = interpolate!(ϕ0)
-    g_empty = similar(ϕ.u.itp.coefs)
-    copy!(g_empty, ϕ.u.itp.coefs)
-    g_data = deepcopy(g_empty)
+    u0 = RegisterDeformation.convert_from_fixed(ϕ0.u)
+    ϕ = interpolate!(deepcopy(ϕ0))  # don't "destroy" u0
+    g_data = similar(ϕ.u.itp.coefs)
 
     emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
 
@@ -99,21 +94,21 @@ function test_pixelwise(fixed, moving, ϕ0, ap)
     pdata2 = RegisterPixelwise.penalty_pixelwise_data!(g_data, ϕ, fixed, emoving) #fully optimized version
     @test pdata1 == pdata2
 
-    ϕ0_dual = GridDeformation(map(dual, u0), [knots[i][:] for i=1:length(knots)])
+    ϕ0_dual = GridDeformation(map(dual, u0), ϕ.knots)
     ϕ_dual = interpolate!(ϕ0_dual)
+    for i in eachindex(ϕ.u.itp.coefs)
+        @test ϕ.u.itp.coefs[i] == real(ϕ_dual.u.itp.coefs[i])
+    end
 
-    g_reg = deepcopy(g_empty)
-    g_total = deepcopy(g_empty)
-
-    g_dual_empty = similar(ϕ_dual.u.itp.coefs)
-    copy!(g_dual_empty, ϕ_dual.u.itp.coefs)
-    g_data_dual = deepcopy(g_dual_empty)
-    g_reg_dual = deepcopy(g_dual_empty)
+    g_reg = similar(g_data)
+    g_total = similar(g_data)
+    g_data_dual = similar(g_data)
+    g_reg_dual = similar(g_data)
 
     #test data penalty gradient
     dualgrad_data!(g_data_dual, ϕ_dual, fixed, emoving)
     for i in eachindex(g_data)
-        @test_approx_eq Array(g_data[i]) Array(g_data_dual[i])
+        @test g_data[i] ≈ g_data_dual[i]
     end
 
     #test that gradients sum properly
@@ -124,7 +119,7 @@ function test_pixelwise(fixed, moving, ϕ0, ap)
     #test affine penalty gradient
     dualgrad_reg!(g_reg_dual, ap, ϕ_dual)
     for i in eachindex(g_reg)
-        @test_approx_eq Array(g_reg[i]) Array(g_reg_dual[i])
+        @test g_reg[i] ≈ g_reg_dual[i]
     end
     print("Test run successful\n")
 end
@@ -144,6 +139,3 @@ test_pixelwise(fixed, moving, ϕ0, ap) #passes
 u0 = rand(1, gridsize...)./10
 ϕ0 = GridDeformation(u0, knots)
 test_pixelwise(fixed, moving, ϕ0, ap) #fails
-
-
-

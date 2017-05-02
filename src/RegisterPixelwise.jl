@@ -35,21 +35,16 @@ function penalty_pixelwise{T<:Real}(ϕ1::InterpolatingDeformation,
 end
 
 function penalty_pixelwise_reg(ap, ϕ::InterpolatingDeformation)
+    penalty_pixelwise_reg!(nothing, ap, ϕ)
+end
+
+function penalty_pixelwise_reg!(g, ap, ϕ::InterpolatingDeformation)
     # The regularization penalty. We apply this to the interpolation
     # coefficients rather than the on-grid values. This may be
     # cheating. It also requires InPlace() so that the sizes match.
     itp = ϕ.u.itp
     Interpolations.padding(itp) == 0 || error("deformation cannot have padding (use `InPlace` boundary conditions)")
-    U = RegisterDeformation.convert_from_fixed(itp.coefs)
-    penalty!(nothing, ap, ϕ)
-end
-
-function penalty_pixelwise_reg!(g, ap, ϕ::InterpolatingDeformation)
-    # See comments above
-    itp = ϕ.u.itp
-    Interpolations.padding(itp) == 0 || error("deformation cannot have padding (use `InPlace` boundary conditions)")
-    U = RegisterDeformation.convert_from_fixed(itp.coefs)
-    penalty!(g, ap, ϕ)
+    penalty!(g, ap, itp.coefs)
 end
 
 @generated function penalty_pixelwise_data{T,N,T1,T2,A}(ϕ::InterpolatingDeformation{T,N,A},
