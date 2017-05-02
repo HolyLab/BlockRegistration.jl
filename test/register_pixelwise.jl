@@ -65,6 +65,24 @@ function dualgrad_data!(g, ϕ, fixed, moving)
     end
 end
 
+function dualgrad_data2!(g, ϕ, fixed, moving)
+    dummy = deepcopy(ϕ.u.itp.coefs)
+    for i in eachindex(ϕ.u.itp.coefs)
+        cur_input = Array(ϕ.u.itp.coefs[i])
+        cur_output = Array(g[i])
+        for j = 1:length(cur_input)
+            temp = cur_input[j]
+            cur_input[j] = dual(value(temp), 1.0)
+            ϕ.u.itp.coefs[i] = Vec(cur_input)
+            #cur_output[j] = epsilon(RegisterPixelwise.penalty_pixelwise_data(ϕ, fixed, moving))
+            cur_output[j] = epsilon(RegisterPixelwise.penalty_pixelwise_data!(dummy, ϕ, fixed, moving))
+            cur_input[j] = temp
+        end
+        g[i] = Vec(cur_output)
+        ϕ.u.itp.coefs[i] = Vec(cur_input)
+    end
+end
+
 function dualgrad_reg!(g, ap, ϕ)
     for i in eachindex(ϕ.u.itp.coefs)
         cur_input = Array(ϕ.u.itp.coefs[i])
@@ -84,12 +102,31 @@ end
 
 function test_pixelwise(fixed, moving, ϕ0, ap)
     print("Beginning new test run\n")
-    ϕ = interpolate!(ϕ0)
-    g_empty = similar(ϕ.u.itp.coefs)
-    copy!(g_empty, ϕ.u.itp.coefs)
+    u0 = RegisterDeformation.convert_from_fixed(ϕ0.u)
+    u_typ = eltype(u0)
+    u_empty = zeros(u_typ, size(u0))
+    ϕ_empty = GridDeformation(u_empty, ϕ0.knots)
+    ϕ_empty_itp = interpolate!(deepcopy(ϕ_empty))
+    u_empty_dual = map(dual, u_empty)
+    ϕ_empty_dual = GridDeformation(u_empty_dual, [ϕ0.knots[i][:] for i=1:length(ϕ0.knots)])
+    ϕ_empty_dual_itp = interpolate!(ϕ_empty_dual)
+
+    ϕ = interpolate!(deepcopy(ϕ0))
+    g_empty = ϕ_empty_itp.u.itp.coefs
     g_data = deepcopy(g_empty)
+    g_reg = deepcopy(g_empty)
+    g_total = deepcopy(g_empty)
+
+
+    #dual arrays / copies
+    ϕ0_dual = GridDeformation(map(dual, u0), [ϕ0.knots[i][:] for i=1:length(ϕ0.knots)])
+    ϕ_dual = interpolate!(deepcopy(ϕ0_dual))
+    g_dual_empty = deepcopy(ϕ_empty_dual_itp.u.itp.coefs)
+    g_data_dual = deepcopy(g_dual_empty)
+    g_reg_dual = deepcopy(g_dual_empty)
 
     emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
+    emoving_dual = extrapolate(interpolate(map(dual, moving), BSpline(Quadratic(Flat())), OnCell()), NaN)
 
     #compare penalty functions with various levels of optimization. TODO: add another simpler method
     pdata1 = RegisterPixelwise.penalty_pixelwise_data(ϕ, fixed, emoving)
@@ -99,19 +136,9 @@ function test_pixelwise(fixed, moving, ϕ0, ap)
     pdata2 = RegisterPixelwise.penalty_pixelwise_data!(g_data, ϕ, fixed, emoving) #fully optimized version
     @test pdata1 == pdata2
 
-    ϕ0_dual = GridDeformation(map(dual, u0), [knots[i][:] for i=1:length(knots)])
-    ϕ_dual = interpolate!(ϕ0_dual)
-
-    g_reg = deepcopy(g_empty)
-    g_total = deepcopy(g_empty)
-
-    g_dual_empty = similar(ϕ_dual.u.itp.coefs)
-    copy!(g_dual_empty, ϕ_dual.u.itp.coefs)
-    g_data_dual = deepcopy(g_dual_empty)
-    g_reg_dual = deepcopy(g_dual_empty)
-
     #test data penalty gradient
-    dualgrad_data!(g_data_dual, ϕ_dual, fixed, emoving)
+    dualgrad_data!(g_data_dual, ϕ_dual, fixed, emoving) #uses less optimized implementation
+#    dualgrad_data2!(g_data_dual, ϕ_dual, fixed, emoving_dual) #uses more optimized implementation
     for i in eachindex(g_data)
         @test_approx_eq Array(g_data[i]) Array(g_data_dual[i])
     end
