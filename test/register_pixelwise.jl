@@ -135,3 +135,8 @@ test_pixelwise(fixed, moving, ϕ0, ap)
 emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
 ϕ, p, p0 = RegisterPixelwise.optimize_pixelwise!(ϕ0, ap, fixed, emoving; stepsize=0.1)
 @test ratio(mismatch0(fixed, moving),1) > ratio(mismatch0(fixed, warp(moving, ϕ)), 1)
+for i in eachindex(ϕ.u)
+    u = ϕ.u[i]
+    @test round(Int, u[1]) == 3
+    @test round(Int, u[2]) == 2
+end
