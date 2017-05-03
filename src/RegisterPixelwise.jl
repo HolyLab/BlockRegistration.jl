@@ -9,6 +9,8 @@ using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
 
 @compat const InterpolatingDeformation{T,N,A<:ScaledInterpolation} = GridDeformation{T,N,A}
 
+export optimize_pixelwise!
+
 function penalty_pixelwise{T<:Real}(ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving)
     convert(T, penalty_pixelwise_reg(ap, ϕ) +
                penalty_pixelwise_data(ϕ, fixed, moving))

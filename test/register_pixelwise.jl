@@ -1,4 +1,4 @@
-using Interpolations, BlockRegistration
+using Interpolations, BlockRegistration, RegisterMismatch
 using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
 import RegisterPixelwise
 using DualNumbers, FixedSizeArrays
@@ -134,8 +134,14 @@ ap = AffinePenalty{Float64,ndims(fixed)}(knots, λ)
 u0 = zeros(1, gridsize...)
 ϕ0 = GridDeformation(u0, knots)
 
-test_pixelwise(fixed, moving, ϕ0, ap) #passes
+test_pixelwise(fixed, moving, ϕ0, ap)
 
 u0 = rand(1, gridsize...)./10
 ϕ0 = GridDeformation(u0, knots)
-test_pixelwise(fixed, moving, ϕ0, ap) #fails
+test_pixelwise(fixed, moving, ϕ0, ap)
+
+u0 = zeros(1, gridsize...)
+ϕ0 = GridDeformation(u0, knots)
+emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
+ϕ, p, p0 = RegisterPixelwise.optimize_pixelwise!(ϕ0, ap, fixed, emoving; stepsize=0.1)
+@test ratio(mismatch0(fixed, moving),1) > ratio(mismatch0(fixed, warp(moving, ϕ)), 1)
