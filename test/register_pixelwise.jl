@@ -2,6 +2,7 @@ using Interpolations, BlockRegistration, RegisterMismatch
 using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
 import RegisterPixelwise
 using DualNumbers, FixedSizeArrays
+using TestImages
 using Base.Test
 
 #add jitter in sampling location, simulating inconsistencies in piezo position when using OCPI under certain conditions
@@ -18,34 +19,6 @@ function jitter{T}(img::Array{T,1}, npix::Float64)
     end
     return out, z_def
 end
-
-#the same as penalty_pixelwise_data, but not generated (not working right now)
-#function testpenalty_data{T,N,T1,T2,A}(ϕ::RegisterPixelwise.InterpolatingDeformation{T,N,A},
-#                                                            fixed::AbstractArray{T1,N},
-#                                                            moving::AbstractInterpolation{T2,N})
-#    IT = Interpolations.itptype(A)
-#    knots = ϕ.knots
-#    steps = map(step, knots)
-#    offsets = map(first, knots)
-#    valid = 0
-#    mm = 0.0
-#    for I in CartesianRange(indices(fixed))
-#        fval = fixed[I]
-#        if isfinite(fval)
-#            uindexes = RegisterPixelwise.scaledindexes(IT, N)
-##            uindexes = [eval(x) for x in uindexes]
-#            u = ϕ.u.itp[eval(uindexes[1])]
-#            ϕxindexes = [I[d] + u[d] for d = 1:N]
-#            mval = moving[ϕxindexes]
-#            if isfinite(mval)
-#                valid += 1
-#                diff = float64(fval)-float64(mval)
-#                mm += diff^2
-#            end
-#        end
-#    end
-#    mm/valid
-#end
 
 #fill each real-valued component of g with the respective gradient entry
 #temporarily sets the epsilon components of g to compute the gradient
@@ -124,6 +97,7 @@ function test_pixelwise(fixed, moving, ϕ0, ap)
     print("Test run successful\n")
 end
 
+#1-dimensional images
 fixed = sin.(linspace(0,4π,40))
 moving, z_def = jitter(fixed, 0.45);
 
@@ -140,8 +114,24 @@ u0 = rand(1, gridsize...)./10
 ϕ0 = GridDeformation(u0, knots)
 test_pixelwise(fixed, moving, ϕ0, ap)
 
-u0 = zeros(1, gridsize...)
+
+emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
+ϕ, p, p0 = RegisterPixelwise.optimize_pixelwise!(ϕ0, ap, fixed, emoving; stepsize=0.1)
+@test ratio(mismatch0(fixed, moving),1) > ratio(mismatch0(fixed, warp(moving, ϕ)), 1)
+
+#2-dimensional images
+inds = (200:300, 200:300)
+img = map(Float64, testimage("cameraman"))
+fixed = img[inds...]
+moving = img[inds[1]-3,inds[2]-2]
+gridsize = (3,3)
+knots = map(d->linspace(1,size(fixed,d),gridsize[d]), (1:ndims(fixed)...))
+ap = AffinePenalty{Float64,ndims(fixed)}(knots, λ)
+u0 = zeros(2, gridsize...)
 ϕ0 = GridDeformation(u0, knots)
+test_pixelwise(fixed, moving, ϕ0, ap)
+
+
 emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
 ϕ, p, p0 = RegisterPixelwise.optimize_pixelwise!(ϕ0, ap, fixed, emoving; stepsize=0.1)
 @test ratio(mismatch0(fixed, moving),1) > ratio(mismatch0(fixed, warp(moving, ϕ)), 1)
