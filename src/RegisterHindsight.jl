@@ -1,6 +1,6 @@
 __precompile__()
 
-module RegisterPixelwise
+module RegisterHindsight
 
 using Interpolations, RegisterDeformation, RegisterPenalty, ImageCore, FixedSizeArrays, OffsetArrays
 using Compat
@@ -9,17 +9,15 @@ using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
 
 @compat const InterpolatingDeformation{T,N,A<:ScaledInterpolation} = GridDeformation{T,N,A}
 
-export optimize_pixelwise!
-
-function penalty_pixelwise{T<:Real}(ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving)
-    convert(T, penalty_pixelwise_reg(ap, ϕ) +
-               penalty_pixelwise_data(ϕ, fixed, moving))
+function penalty_hindsight{T<:Real}(ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving)
+    convert(T, penalty_hindsight_reg(ap, ϕ) +
+               penalty_hindsight_data(ϕ, fixed, moving))
 end
 
-function penalty_pixelwise!{T<:Real}(g, ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving)
+function penalty_hindsight!{T<:Real}(g, ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving)
     gd = similar(g)
-    ret = convert(T, penalty_pixelwise_reg!(g, ap, ϕ) +
-                  penalty_pixelwise_data!(gd, ϕ, fixed, moving))
+    ret = convert(T, penalty_hindsight_reg!(g, ap, ϕ) +
+                  penalty_hindsight_data!(gd, ϕ, fixed, moving))
     for i in eachindex(g)
         g[i] += gd[i]
     end
@@ -27,20 +25,20 @@ function penalty_pixelwise!{T<:Real}(g, ϕ::InterpolatingDeformation, ap::Affine
 end
 
 # For comparison of two deformations
-function penalty_pixelwise{T<:Real}(ϕ1::InterpolatingDeformation,
+function penalty_hindsight{T<:Real}(ϕ1::InterpolatingDeformation,
                                     ϕ2::InterpolatingDeformation,
                                     ap::AffinePenalty{T}, fixed, moving)
     indices(ϕ1.u) == indices(ϕ2.u) || throw(DimensionMismatch("The indices of the two deformations must match, got $(indices(U1)) and $(indices(U2))"))
-    rp1, rp2 = penalty_pixelwise_reg(ap, ϕ1), penalty_pixelwise_reg(ap, ϕ2)
-    dp1, dp2 = penalty_pixelwise_data(ϕ1, ϕ2, fixed, moving)
+    rp1, rp2 = penalty_hindsight_reg(ap, ϕ1), penalty_hindsight_reg(ap, ϕ2)
+    dp1, dp2 = penalty_hindsight_data(ϕ1, ϕ2, fixed, moving)
     convert(T, rp1+dp1), convert(T, rp2+dp2)
 end
 
-function penalty_pixelwise_reg(ap, ϕ::InterpolatingDeformation)
-    penalty_pixelwise_reg!(nothing, ap, ϕ)
+function penalty_hindsight_reg(ap, ϕ::InterpolatingDeformation)
+    penalty_hindsight_reg!(nothing, ap, ϕ)
 end
 
-function penalty_pixelwise_reg!(g, ap, ϕ::InterpolatingDeformation)
+function penalty_hindsight_reg!(g, ap, ϕ::InterpolatingDeformation)
     # The regularization penalty. We apply this to the interpolation
     # coefficients rather than the on-grid values. This may be
     # cheating. It also requires InPlace() so that the sizes match.
@@ -49,7 +47,7 @@ function penalty_pixelwise_reg!(g, ap, ϕ::InterpolatingDeformation)
     penalty!(g, ap, itp.coefs)
 end
 
-@generated function penalty_pixelwise_data{T,N,T1,T2,A}(ϕ::InterpolatingDeformation{T,N,A},
+@generated function penalty_hindsight_data{T,N,T1,T2,A}(ϕ::InterpolatingDeformation{T,N,A},
                                                         fixed::AbstractArray{T1,N},
                                                         moving::AbstractInterpolation{T2,N})
     IT = Interpolations.itptype(A)
@@ -81,24 +79,24 @@ end
 # To compute the derivative with respect to the deformation, it's
 # efficient to re-use the coefficients computed for the shift. We do
 # that by exploiting the generated code in Interpolations.
-function penalty_pixelwise_data!{T,N,T1,T2}(g,
+function penalty_hindsight_data!{T,N,T1,T2}(g,
                                             ϕ::InterpolatingDeformation{T,N},
                                             fixed::AbstractArray{T1,N},
                                             moving::AbstractInterpolation{T2,N})
-    _penalty_pixelwise_data!(g, ϕ.u.itp, ϕ.knots, fixed, moving)
+    _penalty_hindsight_data!(g, ϕ.u.itp, ϕ.knots, fixed, moving)
 end
 
-@generated function _penalty_pixelwise_data!{T,N,TCoefs,IT,GT,Pad,T1,T2}(
+@generated function _penalty_hindsight_data!{T,N,TCoefs,IT,GT,Pad,T1,T2}(
     g,
     itp::BSplineInterpolation{T,N,TCoefs,IT,GT,Pad},
     knots,
     fixed::AbstractArray{T1,N},
     moving::AbstractInterpolation{T2,N})
 
-    penalty_pixelwise_data!_gen(N, IT, Pad)
+    penalty_hindsight_data!_gen(N, IT, Pad)
 end
 
-function penalty_pixelwise_data!_gen{IT}(N, ::Type{IT}, Pad)
+function penalty_hindsight_data!_gen{IT}(N, ::Type{IT}, Pad)
     uindexes = scaledindexes(IT, N)
     xassign = Expr(:block, map((d,e)->Expr(:(=), Symbol("x_",d), e), 1:N, uindexes)...)
     ϕxindexes = [:(I[$d] + y[$d]) for d = 1:N]
@@ -178,7 +176,7 @@ function coef_gen{D<:Degree,IT<:DimSpec{BSpline}, N}(::Type{BSpline{D}}, ::Type{
     end
 end
 
-@generated function penalty_pixelwise_data{T,N,T1,T2}(ϕ1::InterpolatingDeformation{T,N},
+@generated function penalty_hindsight_data{T,N,T1,T2}(ϕ1::InterpolatingDeformation{T,N},
                                                       ϕ2::InterpolatingDeformation{T,N},
                                                       fixed::AbstractArray{T1,N},
                                                       moving::AbstractInterpolation{T2,N})
@@ -212,14 +210,14 @@ end
     end
 end
 
-function optimize_pixelwise!(ϕ::InterpolatingDeformation, dp::DeformationPenalty, fixed, moving::AbstractExtrapolation; stepsize = 1.0)
+function optimize!(ϕ::InterpolatingDeformation, dp::DeformationPenalty, fixed, moving::AbstractExtrapolation; stepsize = 1.0)
     # Optimize the interpolation coefficients, rather than the values
     # of the deformation at the grid points
     ϕtrial = deepcopy(ϕ)
     g = similar(ϕ.u.itp.coefs)
-    objective = ϕ->penalty_pixelwise(ϕ, dp, fixed, moving)
-    objective2 = (ϕ1,ϕ2)->penalty_pixelwise(ϕ1, ϕ2, dp, fixed, moving)
-    ∇objective!(g, ϕ) = penalty_pixelwise!(g, ϕ, dp, fixed, moving)
+    objective = ϕ->penalty_hindsight(ϕ, dp, fixed, moving)
+    objective2 = (ϕ1,ϕ2)->penalty_hindsight(ϕ1, ϕ2, dp, fixed, moving)
+    ∇objective!(g, ϕ) = penalty_hindsight!(g, ϕ, dp, fixed, moving)
     pold = p0 = objective(ϕ)
     while true
         ∇objective!(g, ϕ)
@@ -238,8 +236,8 @@ function optimize_pixelwise!(ϕ::InterpolatingDeformation, dp::DeformationPenalt
     ϕ, pold, p0
 end
 
-function optimize_pixelwise!(ϕ::GridDeformation, dp::DeformationPenalty, fixed, moving::AbstractExtrapolation; stepsize = 1.0)
-    optimize_pixelwise!(interpolate!(ϕ), dp, fixed, moving; stepsize=stepsize)
+function optimize!(ϕ::GridDeformation, dp::DeformationPenalty, fixed, moving::AbstractExtrapolation; stepsize = 1.0)
+    optimize!(interpolate!(ϕ), dp, fixed, moving; stepsize=stepsize)
 end
 
 end

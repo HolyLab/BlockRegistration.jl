@@ -1,6 +1,6 @@
 using Interpolations, BlockRegistration, RegisterMismatch
 using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
-import RegisterPixelwise
+import RegisterHindsight
 using DualNumbers, FixedSizeArrays
 using TestImages
 using Base.Test
@@ -30,7 +30,7 @@ function dualgrad_data!(g, ϕ, fixed, moving)
         for j = 1:nd
             temp = ur[j, i]
             ur[j, i] = dual(value(temp), 1.0)
-            gr[j, i] = epsilon(RegisterPixelwise.penalty_pixelwise_data(ϕ, fixed, moving))
+            gr[j, i] = epsilon(RegisterHindsight.penalty_hindsight_data(ϕ, fixed, moving))
             ur[j, i] = temp
         end
     end
@@ -44,14 +44,14 @@ function dualgrad_reg!(g, ap, ϕ)
         for j = 1:nd
             temp = ur[j, i]
             ur[j, i] = dual(value(temp), 1.0)
-            gr[j, i] = epsilon(RegisterPixelwise.penalty_pixelwise_reg(ap, ϕ))
+            gr[j, i] = epsilon(RegisterHindsight.penalty_hindsight_reg(ap, ϕ))
             ur[j, i] = temp
         end
     end
 end
 
 
-function test_pixelwise(fixed, moving, ϕ0, ap)
+function test_hindsight(fixed, moving, ϕ0, ap)
     print("Beginning new test run\n")
     u0 = RegisterDeformation.convert_from_fixed(ϕ0.u)
     ϕ = interpolate!(deepcopy(ϕ0))  # don't "destroy" u0
@@ -60,11 +60,11 @@ function test_pixelwise(fixed, moving, ϕ0, ap)
     emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
 
     #compare penalty functions with various levels of optimization. TODO: add another simpler method
-    pdata1 = RegisterPixelwise.penalty_pixelwise_data(ϕ, fixed, emoving)
-    preg1 = RegisterPixelwise.penalty_pixelwise_reg(ap, ϕ)
-    ptotal = RegisterPixelwise.penalty_pixelwise(ϕ, ap, fixed, emoving)
+    pdata1 = RegisterHindsight.penalty_hindsight_data(ϕ, fixed, emoving)
+    preg1 = RegisterHindsight.penalty_hindsight_reg(ap, ϕ)
+    ptotal = RegisterHindsight.penalty_hindsight(ϕ, ap, fixed, emoving)
     @test ptotal == pdata1 + preg1
-    pdata2 = RegisterPixelwise.penalty_pixelwise_data!(g_data, ϕ, fixed, emoving) #fully optimized version
+    pdata2 = RegisterHindsight.penalty_hindsight_data!(g_data, ϕ, fixed, emoving) #fully optimized version
     @test pdata1 == pdata2
 
     ϕ0_dual = GridDeformation(map(dual, u0), ϕ.knots)
@@ -85,8 +85,8 @@ function test_pixelwise(fixed, moving, ϕ0, ap)
     end
 
     #test that gradients sum properly
-    RegisterPixelwise.penalty_pixelwise!(g_total, ϕ, ap, fixed, emoving)
-    RegisterPixelwise.penalty_pixelwise_reg!(g_reg, ap, ϕ)
+    RegisterHindsight.penalty_hindsight!(g_total, ϕ, ap, fixed, emoving)
+    RegisterHindsight.penalty_hindsight_reg!(g_reg, ap, ϕ)
     @test g_total == g_data .+ g_reg
 
     #test affine penalty gradient
@@ -108,15 +108,15 @@ ap = AffinePenalty{Float64,ndims(fixed)}(knots, λ)
 u0 = zeros(1, gridsize...)
 ϕ0 = GridDeformation(u0, knots)
 
-test_pixelwise(fixed, moving, ϕ0, ap)
+test_hindsight(fixed, moving, ϕ0, ap)
 
 u0 = rand(1, gridsize...)./10
 ϕ0 = GridDeformation(u0, knots)
-test_pixelwise(fixed, moving, ϕ0, ap)
+test_hindsight(fixed, moving, ϕ0, ap)
 
 
 emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
-ϕ, p, p0 = RegisterPixelwise.optimize_pixelwise!(ϕ0, ap, fixed, emoving; stepsize=0.1)
+ϕ, p, p0 = RegisterHindsight.optimize!(ϕ0, ap, fixed, emoving; stepsize=0.1)
 @test ratio(mismatch0(fixed, moving),1) > ratio(mismatch0(fixed, warp(moving, ϕ)), 1)
 
 #2-dimensional images
@@ -129,11 +129,11 @@ knots = map(d->linspace(1,size(fixed,d),gridsize[d]), (1:ndims(fixed)...))
 ap = AffinePenalty{Float64,ndims(fixed)}(knots, λ)
 u0 = zeros(2, gridsize...)
 ϕ0 = GridDeformation(u0, knots)
-test_pixelwise(fixed, moving, ϕ0, ap)
+test_hindsight(fixed, moving, ϕ0, ap)
 
 
 emoving = extrapolate(interpolate(moving, BSpline(Quadratic(Flat())), OnCell()), NaN)
-ϕ, p, p0 = RegisterPixelwise.optimize_pixelwise!(ϕ0, ap, fixed, emoving; stepsize=0.1)
+ϕ, p, p0 = RegisterHindsight.optimize!(ϕ0, ap, fixed, emoving; stepsize=0.1)
 @test ratio(mismatch0(fixed, moving),1) > ratio(mismatch0(fixed, warp(moving, ϕ)), 1)
 for i in eachindex(ϕ.u)
     u = ϕ.u[i]
