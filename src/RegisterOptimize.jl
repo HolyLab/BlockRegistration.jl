@@ -15,7 +15,6 @@ export
     fit_sigmoid,
     fixed_λ,
     initial_deformation,
-    optimize!,
     optimize_rigid
 
 """
@@ -27,7 +26,7 @@ The main functions are:
 
 - `optimize_rigid`: iteratively improve a rigid transformation, given raw images
 - `initial_deformation`: provide an initial guess based on mismatch quadratic fits
-- `optimize!`: iteratively improve a deformation, given mismatch data
+- `RegisterOptimize.optimize!`: iteratively improve a deformation, given mismatch data
 - `fixed_λ` and `auto_λ`: "complete" optimizers that generate initial guesses and then find the minimum
 """
 RegisterOptimize

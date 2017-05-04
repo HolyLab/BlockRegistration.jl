@@ -16,6 +16,7 @@ end
 @reexport using RegisterFit
 @reexport using RegisterOptimize
 @reexport using RegisterPenalty
+@reexport using RegisterHindsight
 
 # We can't pop!(LOAD_PATH) because of RegisterGUI & the
 # RegisterMismatch/RegisterMismatchCuda issue.
