@@ -316,8 +316,7 @@ position `(i,j,...)`.
 You can use `_, g = compose(identity, ϕ_new)` if you need the gradient
 for when `ϕ_old` is equal to the identity transformation.
 """
-function compose{T1,T2,N,A<:AbstractInterpolation}(
-        ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
+function compose{T1,T2,N,A<:AbstractInterpolation}(ϕ_old::GridDeformation{T1,N,A}, ϕ_new::GridDeformation{T2,N})
     u, knots = ϕ_old.u, ϕ_old.knots
     ϕ_new.knots == knots || error("Not yet implemented for incommensurate knots")
     unew = ϕ_new.u
@@ -339,6 +338,25 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(
     end
     GridDeformation(ucomp, knots), g
 end
+
+"""
+`ϕsi_old` and `ϕs_new` will generated `ϕs_c` vector and `g` vector
+`ϕsi_old` is interpolated ϕs_old:
+e.g) `ϕsi_old = map(Interpolations.interpolate!, copy(ϕs_old))`
+"""
+function compose{G1<:GridDeformation, G2<:GridDeformation}(ϕsi_old::AbstractVector{G1}, ϕs_new::AbstractVector{G2})
+    n = length(ϕs_new)
+    length(ϕsi_old) == n || throw(DimensionMismatch("vectors-of-deformations must have the same length, got $(length(ϕsi_old)) and $n"))
+    ϕc1, g1 = compose(first(ϕsi_old), first(ϕs_new))
+    ϕs_c = Vector{typeof(ϕc1)}(n)
+    gs = Vector{typeof(g1)}(n)
+    ϕs_c[1], gs[1] = ϕc1, g1
+    for i in 2:n
+        ϕs_c[i], gs[i] = compose(ϕsi_old[i], ϕs_new[i]);
+    end
+    ϕs_c, gs
+end
+
 
 function compose{T,N}(f::Function, ϕ_new::GridDeformation{T,N})
     f == identity || error("Only the identity function is supported")
