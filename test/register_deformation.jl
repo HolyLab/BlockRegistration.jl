@@ -27,10 +27,10 @@ for knots in ((linspace(1,15,5),),
     ϕ = interpolate(RegisterDeformation.GridDeformation(u, knots))
     for i = 1:10
         x = map(z->rand(1:z), rng)
-        @test_approx_eq ϕ[x...] [x...]
+        @test ϕ[x...] ≈ [x...]
         if all(x->x>2, sz)
             y = map(z->rand(2:z-1)+rand()-0.5, rng)
-            @test_approx_eq ϕ[y...] [y...]
+            @test ϕ[y...] ≈ [y...]
         end
     end
     # Constant shift
@@ -39,10 +39,10 @@ for knots in ((linspace(1,15,5),),
     ϕ = interpolate(RegisterDeformation.GridDeformation(u, knots))
     for i = 1:10
         x = map(z->rand(1:z), rng)
-        @test_approx_eq ϕ[x...] [x...]+dx
+        @test ϕ[x...] ≈ [x...]+dx
         if all(x->x>2, sz)
             y = map(z->rand(2:z-1)+rand()-0.5, rng)
-            @test_approx_eq ϕ[y...] [y...]+dx
+            @test ϕ[y...] ≈ [y...]+dx
         end
     end
     # "Biquadratic"
@@ -68,7 +68,7 @@ for knots in ((linspace(1,15,5),),
             y = Float64[randrange((knot[2]+knot[1])/2, (knot[end]+knot[end-1])/2) for knot in knots]
             dx = Float64[fs[d](y) for d=1:N]
             try
-                @test_approx_eq ϕ[y...] y + Float64[fs[d](y) for d=1:N]
+                @test ϕ[y...] ≈ y + Float64[fs[d](y) for d=1:N]
             catch err
                 @show y knots
                 @show [((knot[2]+knot[1])/2, (knot[end]+knot[end-1])/2) for knot in knots]

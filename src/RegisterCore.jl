@@ -6,6 +6,8 @@ using CenterIndexedArrays
 using Base.Cartesian: @nloops, @nref, @ntuple
 using Images, ColorTypes
 
+using Compat
+
 import Base: +, -, *, /
 import Base: eltype, getindex, ndims, pointer, setindex!, show, size
 import Base: unsafe_getindex
@@ -221,7 +223,7 @@ function Base.showcompact(io::IO, p::NumDenom)
     print(io, ")")
 end
 
-typealias MismatchArray{ND<:NumDenom,N,A} CenterIndexedArray{ND,N,A}
+@compat const MismatchArray{ND<:NumDenom,N,A} = CenterIndexedArray{ND,N,A}
 
 maxshift(A::MismatchArray) = A.halfsize
 
@@ -434,8 +436,13 @@ parent.
 See also `trimmedview`.
 """
 paddedview(A::SubArray) = _paddedview(A, (), (), A.indexes...)
-_paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
-    SubArray(A.parent, newindexes, newsize)
+if VERSION < v"0.6.0-dev"
+    _paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
+        SubArray(A.parent, newindexes, newsize)
+else
+    _paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
+        SubArray(A.parent, newindexes)
+end
 @inline function _paddedview(A, newindexes, newsize, index, indexes...)
     d = length(newindexes)+1
     _paddedview(A, (newindexes..., pdindex(A.parent, d, index)), pdsize(A.parent, newsize, d, index), indexes...)

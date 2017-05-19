@@ -8,6 +8,8 @@ using Interpolations, FixedSizeArrays, Base.Cartesian
 using RegisterDeformation, RegisterCore, CenterIndexedArrays, CachedInterpolations
 using RegisterDeformation: convert_from_fixed, convert_to_fixed
 
+using Compat
+
 export AffinePenalty, DeformationPenalty, penalty!, interpolate_mm!
 
 
@@ -29,7 +31,7 @@ The main exported types/functions are:
 RegisterPenalty
 
 
-abstract DeformationPenalty{T,N}
+@compat abstract type DeformationPenalty{T,N} end
 Base.eltype{T,N}(::Type{DeformationPenalty{T,N}}) = T
 Base.eltype{DP<:DeformationPenalty}(::Type{DP}) = eltype(supertype(DP))
 Base.eltype(dp::DeformationPenalty) = eltype(typeof(dp))
@@ -144,7 +146,7 @@ end
 # Data penalty #
 ################
 
-typealias CenteredInterpolant{T,N,A<:AbstractInterpolation} Union{MismatchArray{T,N,A}, CachedInterpolation{T,N}}
+@compat const CenteredInterpolant{T,N,A<:AbstractInterpolation} = Union{MismatchArray{T,N,A}, CachedInterpolation{T,N}}
 
 """
 `p = penalty!(g, ϕ, mmis, [keep=trues(size(mmis))])` computes the
@@ -282,9 +284,9 @@ type AffinePenalty{T,N} <: DeformationPenalty{T,N}
     F::Matrix{T}   # geometry data for the affine-residual penalty
     λ::T           # regularization coefficient
 
-    AffinePenalty(F::Matrix{T}, λ::T, _) = new(F, λ)
+    (::Type{AffinePenalty{T,N}}){T,N}(F::Matrix{T}, λ::T, _) = new{T,N}(F, λ)
 
-    function AffinePenalty(knots::NTuple{N}, λ)
+    function (::Type{AffinePenalty{T,N}}){T,N}(knots::NTuple{N}, λ)
         gridsize = map(length, knots)
         C = Array(Float64, prod(gridsize), N+1)
         i = 0
@@ -295,13 +297,13 @@ type AffinePenalty{T,N} <: DeformationPenalty{T,N}
             end
         end
         F, _ = qr(C)
-        new(F, λ)
+        new{T,N}(F, λ)
     end
 
-    function AffinePenalty(knots::AbstractMatrix, λ)
+    function (::Type{AffinePenalty{T,N}}){T,N}(knots::AbstractMatrix, λ)
         C = hcat(knots', ones(eltype(knots), size(knots, 2)))
         F, _ = qr(C)
-        new(F, λ)
+        new{T,N}(F, λ)
     end
 end
 

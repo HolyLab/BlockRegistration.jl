@@ -5,6 +5,7 @@ __precompile__()
 module CenterIndexedArrays
 
 using Images
+using Compat
 
 export CenterIndexedArray
 
@@ -19,22 +20,22 @@ immutable CenterIndexedArray{T,N,A<:AbstractArray} <: AbstractArray{T,N}
     data::A
     halfsize::NTuple{N,Int}
 
-    function CenterIndexedArray(data::A)
-        new(data, _halfsize(data))
+    function (::Type{CenterIndexedArray{T,N,A}}){T,N,A<:AbstractArray}(data::A)
+        new{T,N,A}(data, _halfsize(data))
     end
 end
 
 CenterIndexedArray{T,N}(A::AbstractArray{T,N}) = CenterIndexedArray{T,N,typeof(A)}(A)
-CenterIndexedArray{T}(::Type{T}, dims) = CenterIndexedArray(Array(T, dims))
-CenterIndexedArray{T}(::Type{T}, dims...) = CenterIndexedArray(Array(T, dims))
+CenterIndexedArray{T}(::Type{T}, dims) = CenterIndexedArray(Array{T}(dims))
+CenterIndexedArray{T}(::Type{T}, dims...) = CenterIndexedArray(Array{T}(dims))
 
 # This is the AbstractArray default, but do this just to be sure
-Base.linearindexing{A<:CenterIndexedArray}(::Type{A}) = Base.LinearSlow()
+@compat Base.IndexStyle{A<:CenterIndexedArray}(::Type{A}) = IndexCartesian()
 
 Base.size(A::CenterIndexedArray) = size(A.data)
 Base.indices(A::CenterIndexedArray) = map(n->(-n:n), A.halfsize)
 
-function Base.similar{T}(A::CenterIndexedArray, ::Type{T}, inds::Tuple{Vararg{UnitRange}})
+function Base.similar{T}(A::CenterIndexedArray, ::Type{T}, inds::Tuple{UnitRange,Vararg{UnitRange}})
     data = Array{T}(map(length, inds))
     CenterIndexedArray(data)
 end
@@ -52,7 +53,7 @@ end
 
 offset(off, i) = off+i+1
 
-typealias Index Union{Colon,AbstractVector}
+const Index = Union{Colon,AbstractVector}
 
 Base.getindex{T}(A::CenterIndexedArray{T,1}, I::Index) = CenterIndexedArray([A[i] for i in _cindex(A, 1, I)])
 Base.getindex{T}(A::CenterIndexedArray{T,2}, I::Index, J::Index) = CenterIndexedArray([A[i,j] for i in _cindex(A,1,I), j in _cindex(A,2,J)])

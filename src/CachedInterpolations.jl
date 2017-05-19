@@ -90,7 +90,7 @@ function cachedinterpolators{T,M}(parent::Array{T,M}, N, origin=ntuple(d->0,N))
     0 <= N <= M || error("N must be between 0 and $M")
     length(origin) == N || throw(DimensionMismatch("length(origin) = $(length(origin)) is inconsistent with $N interpolating dimensions"))
     sz3 = ntuple(d->d<=N ? 3 : size(parent,d), M)::NTuple{M,Int}
-    buffer = Array(eltype(parent), sz3)
+    buffer = Array{eltype(parent)}(sz3)
     sztiles = size(parent)[N+1:end]  # the tiling dimensions of parent
     # use an impossible initial value (post-offset by origin) to
     # ensure the first access will result in a cache miss
@@ -100,7 +100,7 @@ end
 
 # function-barriered to circumvent type-instability in sztiles
 @noinline function _cachedinterpolators{T,N,M}(buffer::Array{T,M}, parent::Array{T,M}, origin::NTuple{N,Int}, center::NTuple{N,Int}, sztiles)
-    itps = Array(CachedInterpolation{T,N,M,origin}, sztiles)
+    itps = Array{CachedInterpolation{T,N,M,origin}}(sztiles)
     for tileindex = 1:prod(sztiles)
         itps[tileindex] = CachedInterpolation{T,N,M,origin}(buffer, parent, center, tileindex)
     end

@@ -7,6 +7,8 @@ using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit, CachedInt
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base: Test, tail
 
+using Compat
+
 import Base: *
 
 export
@@ -33,7 +35,7 @@ RegisterOptimize
 
 
 # Some conveniences for MathProgBase
-abstract GradOnly <: MathProgBase.AbstractNLPEvaluator
+@compat abstract type GradOnly <: MathProgBase.AbstractNLPEvaluator end
 
 function MathProgBase.initialize(d::GradOnly, requested_features::Vector{Symbol})
     for feat in requested_features
@@ -45,14 +47,14 @@ end
 MathProgBase.features_available(d::GradOnly) = [:Grad, :Jac]
 
 
-abstract GradOnlyBoundsOnly <: GradOnly
+@compat abstract type GradOnlyBoundsOnly <: GradOnly end
 
 MathProgBase.eval_g(::GradOnlyBoundsOnly, g, x) = nothing
 MathProgBase.jac_structure(::GradOnlyBoundsOnly) = Int[], Int[]
 MathProgBase.eval_jac_g(::GradOnlyBoundsOnly, J, x) = nothing
 
 
-abstract BoundsOnly <: MathProgBase.AbstractNLPEvaluator
+@compat abstract type BoundsOnly <: MathProgBase.AbstractNLPEvaluator end
 
 MathProgBase.eval_g(::BoundsOnly, g, x) = nothing
 MathProgBase.jac_structure(::BoundsOnly) = Int[], Int[]

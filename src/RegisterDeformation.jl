@@ -7,6 +7,7 @@ using RegisterUtilities
 using Base: Cartesian, tail
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
 import ImageTransformations: warp, warp!
+using Compat
 
 export
     # types
@@ -30,9 +31,9 @@ export
     warp!,
     warpgrid
 
-typealias DimsLike Union{Vector{Int}, Dims}
-typealias InterpExtrap Union{AbstractInterpolation,AbstractExtrapolation}
-typealias Extrapolatable{T,N} Union{TransformedArray{T,N},AbstractExtrapolation{T,N}}
+const DimsLike = Union{Vector{Int}, Dims}
+const InterpExtrap = Union{AbstractInterpolation,AbstractExtrapolation}
+@compat const Extrapolatable{T,N} = Union{TransformedArray{T,N},AbstractExtrapolation{T,N}}
 
 """
 # RegisterDeformation
@@ -62,7 +63,7 @@ The major functions/types exported by RegisterDeformation are:
 """
 RegisterDeformation
 
-abstract AbstractDeformation{T,N}
+@compat abstract type AbstractDeformation{T,N} end
 Base.eltype{T,N}(::Type{AbstractDeformation{T,N}}) = T
 Base.ndims{T,N}(::Type{AbstractDeformation{T,N}}) = N
 Base.eltype{D<:AbstractDeformation}(::Type{D}) = eltype(supertype(D))
@@ -95,20 +96,20 @@ immutable GridDeformation{T,N,A<:AbstractArray,L} <: AbstractDeformation{T,N}
     u::A
     knots::NTuple{N,L}
 
-    function GridDeformation{FV<:FixedVector}(u::AbstractArray{FV,N},
-                                              knots::NTuple{N,L})
+    function (::Type{GridDeformation{T,N,A,L}}){T,N,A,L,FV<:FixedVector}(u::AbstractArray{FV,N}, knots::NTuple{N,L})
+        typeof(u) == A || error("typeof(u) = $(typeof(u)), which is different from $A")
         length(FV) == N || throw(DimensionMismatch("Dimensionality $(length(FV)) must match $N knot vectors"))
         for d = 1:N
             size(u, d) == length(knots[d]) || error("size(u) = $(size(u)), but the knots specify a grid of size $(map(length, knots))")
         end
-        new(u, knots)
+        new{T,N,A,L}(u, knots)
     end
-    function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV,N})
-        new(u, u.ranges)
+    function (::Type{GridDeformation{T,N,A,L}}){T,N,A,L,FV<:FixedVector}(u::ScaledInterpolation{FV,N})
+        new{T,N,A,L}(u, u.ranges)
     end
 end
 
-typealias InterpolatingDeformation{T,N,A<:AbstractInterpolation} GridDeformation{T,N,A}
+@compat const InterpolatingDeformation{T,N,A<:AbstractInterpolation} = GridDeformation{T,N,A}
 
 # Ambiguity avoidance
 function GridDeformation{FV<:FixedVector,N}(u::AbstractArray{FV,N},
