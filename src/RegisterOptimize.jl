@@ -266,8 +266,8 @@ function _copy!(dest, rng, src::Vec)
 end
 
 function find_opt(P, b)
-    x, result = cg(P, b)
-    x, result.isconverged
+    x = cg(P, b)
+    x, true
 end
 
 # A type for computing multiplication by the linear operator
