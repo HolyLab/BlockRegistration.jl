@@ -266,8 +266,8 @@ function _copy!(dest, rng, src::Vec)
 end
 
 function find_opt(P, b)
-    x, result = cg(P, b)
-    x, result.isconverged
+    x = cg(P, b)
+    x, true
 end
 
 # A type for computing multiplication by the linear operator
@@ -477,6 +477,13 @@ function _optimize!(ϕ, ϕ_old, dp::DeformationPenalty, mmis, T::Type; tol=1e-6,
     _optimize!(objective, ϕ, dp, mmis, tol, print_level; kwargs...)
 end
 
+function optimize!{Tf<:Number, T, N}(ϕ, ϕ_old, dp::AffinePenalty{T,N}, mmis::Array{Tf})
+    ND = NumDenom{Tf}
+    mmisr = reinterpret(ND, mmis, tail(size(mmis)))
+    mmisc = cachedinterpolators(mmisr, N, ntuple(d->(size(mmisr,d)+1)>>1, N))
+    optimize!(ϕ, ϕ_old, dp, mmisc)
+end
+
 function _optimize!(objective, ϕ, dp, mmis, tol, print_level; kwargs...)
     uvec = u_as_vec(ϕ)
     T = eltype(uvec)
@@ -578,6 +585,12 @@ function optimize!(ϕs, ϕs_old, dp::AffinePenalty, λt, mmis; kwargs...)
     _copy!(ϕs, result.minimum), result.f_minimum
 end
 
+function optimize!{Tf<:Number, T, N}(ϕs, ϕs_old, dp::AffinePenalty{T,N}, λt, mmis::Array{Tf})
+    ND = NumDenom{Tf}
+    mmisr = reinterpret(ND, mmis, tail(size(mmis)))
+    mmisc = cachedinterpolators(mmisr, N, ntuple(d->(size(mmisr,d)+1)>>1, N))
+    optimize!(ϕs, ϕs_old, dp, λt, mmisc)
+end
 
 type DeformTseriesOpt{D,Dsold,DP,T,M} <: GradOnlyBoundsOnly
     ϕs::Vector{D}
@@ -620,7 +633,7 @@ object for that grid, and `mmis` is the array-of-mismatch arrays
 
 See also: `auto_λ`.
 """
-function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis; mu_init=0.1, kwargs...)
+function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis; ϕs_old = identity, mu_init=0.1, kwargs...)
     maxshift = map(x->(x-1)>>1, size(first(mmis)))
     u0, isconverged = initial_deformation(ap, cs, Qs)
     if !isconverged
@@ -633,7 +646,7 @@ function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis; m
     ϕ = GridDeformation(u0, knots)
     local mismatch
     while mu_init > 1e-16
-        ϕ, mismatch, mismatch0 = optimize!(ϕ, identity, ap, mmis, mu_strategy="monotone", mu_init=mu_init, kwargs...)
+        ϕ, mismatch, mismatch0 = optimize!(ϕ, ϕs_old, ap, mmis, mu_strategy="monotone", mu_init=mu_init, kwargs...)
         mismatch <= mismatch0 && break
         mu_init /= 10
         @show mu_init
@@ -646,7 +659,7 @@ end
 computes an optimal vector-of-deformations `ϕs` for an image sequence,
 using an temporal penalty coefficient `λt`.
 """
-function fixed_λ{T,N,_}(cs::AbstractArray{Vec{N,T}}, Qs::AbstractArray{Mat{N,N,T}}, knots::NTuple{N}, ap::AffinePenalty{_,N}, λt, mmis; mu_init=0.1, kwargs...)
+function fixed_λ{T,N,_}(cs::AbstractArray{Vec{N,T}}, Qs::AbstractArray{Mat{N,N,T}}, knots::NTuple{N}, ap::AffinePenalty{_,N}, λt, mmis; ϕs_old = identity, mu_init=0.1, kwargs...)
     λtT = T(λt)
     apT = convert(AffinePenalty{T,N}, ap)
     maxshift = map(x->(x-1)>>1, size(first(mmis)))
@@ -661,7 +674,7 @@ function fixed_λ{T,N,_}(cs::AbstractArray{Vec{N,T}}, Qs::AbstractArray{Mat{N,N,
     ϕs = [GridDeformation(u0[colons..., i], knots) for i = 1:size(u0)[end]]
     local mismatch
     println("Starting optimization.")
-    optimize!(ϕs, identity, apT, λtT, mmis; kwargs...)
+    optimize!(ϕs, ϕs_old, apT, λtT, mmis; kwargs...)
 end
 
 # This version re-packs variables as read from the .jld file

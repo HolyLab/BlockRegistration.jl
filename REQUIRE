@@ -6,7 +6,7 @@ FixedSizeArrays 0.2.2
 NLsolve
 MathProgBase 0.4
 Ipopt
-IterativeSolvers
+IterativeSolvers 0.3
 CUDArt
 CUFFT
 HDF5
