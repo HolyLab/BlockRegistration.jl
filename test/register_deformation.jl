@@ -1,5 +1,5 @@
 import BlockRegistration, RegisterDeformation
-using AffineTransforms, Interpolations, ColorTypes, ForwardDiff, FixedSizeArrays, Images, AxisArrays
+using AffineTransforms, Interpolations, ColorTypes, ForwardDiff, StaticArrays, Images, AxisArrays
 using Base.Test
 
 using RegisterTestUtilities
@@ -250,8 +250,8 @@ warped = open(fn, "r") do io
     read(io, Float32, size(img))
 end
 @test warped == img
-# With Array{Vec}
-uarray = reinterpret(Vec{2,Float64}, zeros(2,3,3,7), (3,3,7))
+# With Array{SVector}
+uarray = reinterpret(SVector{2,Float64}, zeros(2,3,3,7), (3,3,7))
 open(fn, "w") do io
     RegisterDeformation.warp!(Float32, io, img, uarray)
 end
@@ -301,8 +301,8 @@ knots = (linspace(1,20,2),)
 ϕs = RegisterDeformation.tinterpolate(ϕsindex, [2,4], 5)
 @test length(ϕs) == 5
 @test eltype(ϕs) == eltype(ϕsindex)
-@test all(ϕs[1].u .== Vec(1.0))
-@test all(ϕs[3].u .== Vec(2.0))
+@test all(map(x-> x == @SVector([1.0]), ϕs[1].u))
+@test all(map(x-> x == @SVector([2.0]), ϕs[3].u))
 
 # median filtering
 u = rand(2, 3, 3, 9)

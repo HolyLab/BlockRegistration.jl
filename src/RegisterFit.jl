@@ -2,7 +2,7 @@ __precompile__()
 
 module RegisterFit
 
-using AffineTransforms, Interpolations, FixedSizeArrays, NLsolve
+using AffineTransforms, Interpolations, StaticArrays, NLsolve
 using RegisterPenalty, RegisterCore, CenterIndexedArrays
 
 using Base: @nloops, @nexprs, @nref, @nif
@@ -210,7 +210,7 @@ function uclamp!{T<:Number}(u::AbstractArray{T}, maxshift)
     u
 end
 
-function uclamp!{T<:FixedArray}(u::AbstractArray{T}, maxshift)
+function uclamp!{T<:StaticVector}(u::AbstractArray{T}, maxshift)
     uclamp!(reinterpret(eltype(T), u, (length(T), size(u)...)), maxshift)
     u
 end
@@ -459,8 +459,8 @@ The return values are suited for input the `fixed_λ` and `auto_λ`.
 function mms2fit!{A<:MismatchArray,N}(mms::AbstractArray{A,N}, thresh)
     T = eltype(eltype(A))
     gridsize = size(mms)
-    cs = Array(Vec{N,T}, gridsize)
-    Qs = Array(Mat{N,N,T}, gridsize)
+    cs = Array{SVector{N,T}}(gridsize)
+    Qs = Array{similar_type(SArray, T, Size(N, N))}(gridsize)
     for i = 1:length(mms)
         _, cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)
     end

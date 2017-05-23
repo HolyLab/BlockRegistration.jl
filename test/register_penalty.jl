@@ -1,4 +1,4 @@
-using Base.Test, DualNumbers, ForwardDiff, AffineTransforms, FixedSizeArrays, Interpolations
+using Base.Test, DualNumbers, ForwardDiff, AffineTransforms, StaticArrays, Interpolations
 import BlockRegistration, RegisterPenalty
 using RegisterCore, RegisterDeformation
 RP = RegisterPenalty
@@ -254,7 +254,7 @@ end
 function similarϕ{Tϕ,N,A,L,Tx}(ϕs::Vector{GridDeformation{Tϕ,N,A,L}}, x::Array{Tx})
     len = N*length(first(ϕs).u)
     length(x) == len*length(ϕs) || throw(DimensionMismatch("ϕs is incommensurate with a vector of length $(length(x))"))
-    xf = RegisterDeformation.convert_to_fixed(Vec{N,Tx}, x, (size(first(ϕs).u)..., length(ϕs)))
+    xf = RegisterDeformation.convert_to_fixed(SVector{N,Tx}, x, (size(first(ϕs).u)..., length(ϕs)))
     colons = ntuple(i->Colon(), N)::NTuple{N,Colon}
     [GridDeformation(xf[colons..., i], ϕs[i].knots) for i = 1:length(ϕs)]
 end

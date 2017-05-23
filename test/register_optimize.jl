@@ -1,4 +1,4 @@
-using FixedSizeArrays, AffineTransforms, Interpolations, Base.Test
+using StaticArrays, AffineTransforms, Interpolations, Base.Test
 import BlockRegistration, RegisterOptimize
 using RegisterCore, RegisterPenalty, RegisterDeformation, RegisterMismatch, RegisterFit
 
@@ -32,7 +32,7 @@ end
 function initial_guess_direct(A, cs::Matrix, Qs::Matrix)
     Ac, b = build_Ac_b(A, cs, Qs)
     x = Ac\b
-    reinterpret(Vec{2,Float64}, x, size(Qs))
+    reinterpret(SVector{2,Float64}, x, size(Qs))
 end
 
 function build_Ac_b{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
@@ -68,7 +68,7 @@ end
 function initial_guess_direct{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
     Ac, b = build_Ac_b(A, λt, cs, Qs)
     x = Ac\b
-    reinterpret(Vec{2,Float64}, x, size(Qs))
+    reinterpret(SVector{2,Float64}, x, size(Qs))
 end
 
 function build_A(knots, λ)
@@ -105,7 +105,7 @@ ux = initial_guess_direct(A, cs, Qs)
 u, isconverged = @inferred(RegisterOptimize.initial_deformation(ap, cs, Qs))
 @test isconverged
 @test size(u) == size(ux)
-@test eltype(u) == Vec{2,Float64}
+@test eltype(u) == SVector{2,Float64}
 # The accuracy here is low only because of the diagonal regularization
 for I in eachindex(u)
     @test_approx_eq_eps u[I] cs[I] 1e-3
@@ -138,14 +138,14 @@ ux = initial_guess_direct(A, cs, Qs)
 u, isconverged = RegisterOptimize.initial_deformation(ap, cs, Qs)
 @test isconverged
 @test size(u) == size(ux)
-@test eltype(u) == Vec{2,Float64}
+@test eltype(u) == SVector{2,Float64}
 for I in eachindex(u)
     @test_approx_eq_eps u[I] ux[I] 1e-3
 end
 
 # Random initialization with a temporal penalty
-Qs = Array(Mat{2,2,Float64}, gridsize..., 5)
-cs = Array(Vec{2,Float64}, gridsize..., 5)
+Qs = Array{SMatrix{2,2,Float64,4}}(gridsize..., 5)
+cs = Array{SVector{2,Float64}}(gridsize..., 5)
 for I in CartesianRange(size(Qs))
     QF = rand(2,2)
     Qs[I] = QF'*QF
@@ -166,7 +166,7 @@ ux = initial_guess_direct(A, 1.0, csr, Qsr)
 u, isconverged = RegisterOptimize.initial_deformation(ap, 1.0, cs, Qs)
 @test isconverged
 @test size(u) == size(ux)
-@test eltype(u) == Vec{2,Float64}
+@test eltype(u) == SVector{2,Float64}
 for I in eachindex(u)
     @test_approx_eq_eps u[I] ux[I] 1e-3
 end
@@ -226,7 +226,7 @@ end
 # fdgrad = ForwardDiff.gradient(x->SolverInterface.eval_f(objective, x))
 # error("stop")
 # @test size(u) == size(ux)
-# @test eltype(u) == Vec{2,Float64}
+# @test eltype(u) == SVector{2,Float64}
 # ϕ_c = ϕ_old(GridDeformation(u, knots))
 # for I in eachindex(ux)
 #     @test_approx_eq ϕ_c.u[I] ux[I]

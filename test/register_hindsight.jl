@@ -1,7 +1,7 @@
 using Interpolations, BlockRegistration, RegisterMismatch
 using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
 import RegisterHindsight
-using DualNumbers, FixedSizeArrays
+using DualNumbers, StaticArrays
 using TestImages
 using Base.Test
 

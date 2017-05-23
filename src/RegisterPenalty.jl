@@ -4,7 +4,7 @@ __precompile__()
 
 module RegisterPenalty
 
-using Interpolations, FixedSizeArrays, Base.Cartesian
+using Interpolations, StaticArrays, Base.Cartesian
 using RegisterDeformation, RegisterCore, CenterIndexedArrays, CachedInterpolations
 using RegisterDeformation: convert_from_fixed, convert_to_fixed
 
@@ -72,7 +72,7 @@ interpolating. In contrast, `ϕ` must not be interpolating.
 
 `g` can be a single `Vector{T}` (for some number-type `T`), or can be
 the same type and size as `ϕ.u`, i.e., an array of fixed-sized vectors
-`Vec{N,T}`.
+`SVector{N,T}`.
 
 Further details are described in the help for the individual
 `penalty!` calls.
@@ -95,7 +95,7 @@ function penalty!(g, ϕ, ϕ_old, dp::DeformationPenalty, mmis::AbstractArray, ke
     convert(T, val)
 end
 
-# Allow it to be called without FixedSizeArrays
+# Allow it to be called without StaticArrays
 function penalty!{T<:Number}(g::Array{T}, ϕ, ϕ_old, dp::DeformationPenalty, mmis::AbstractArray, keep = trues(size(mmis)))
     gf = RegisterDeformation.convert_to_fixed(g, (ndims(dp), size(ϕ.u)...))
     penalty!(gf, ϕ, ϕ_old, dp, mmis, keep)
@@ -181,7 +181,7 @@ function penalty!{Tg<:Number,M<:CenteredInterpolant}(g::Array{Tg}, ϕ::AbstractD
     penalty!(gf, ϕ, mmis, keep)
 end
 
-function penalty!{Tu,Dim,M<:CenteredInterpolant}(g, u::AbstractArray{Vec{Dim,Tu}}, mmis::AbstractArray{M}, keep=trues(size(mmis)))
+function penalty!{Tu,Dim,M<:CenteredInterpolant}(g, u::AbstractArray{SVector{Dim,Tu}}, mmis::AbstractArray{M}, keep=trues(size(mmis)))
     # This "outer" function just handles the chain rule for computing the
     # total penalty and gradient. The "real" work is done by penalty_nd!.
     nblocks = length(mmis)
@@ -193,7 +193,7 @@ function penalty!{Tu,Dim,M<:CenteredInterpolant}(g, u::AbstractArray{Vec{Dim,Tu}
         end
     end
     if calc_gradient
-        gnd = similar(u, Vec{Dim,NumDenom{Tu}})
+        gnd = similar(u, SVector{Dim,NumDenom{Tu}})
         nd = penalty_nd!(gnd, u, mmis, keep)
         N, D = nd.num, nd.denom
         invD = 1/D
@@ -247,17 +247,17 @@ end
 
 penalty_nd!(gnd, u::AbstractInterpolation, mmis, keep) = error("ϕ must not be interpolating")
 
-@generated function checkbounds_shift{N}(dx::Vec{N}, mxs)
+@generated function checkbounds_shift{N}(dx::SVector{N}, mxs)
     quote
         @nexprs $N d->(if abs(dx[d]) >= mxs[d]-0.5 return false end)
         true
     end
 end
 
-@generated function _wsum{N}(x::Vec{N}, cnum, cdenom)
+@generated function _wsum{N}(x::SVector{N}, cnum, cdenom)
     args = [:(cnum*x[$d].num + cdenom*x[$d].denom) for d = 1:N]
     quote
-        Vec($(args...))
+        SVector($(args...))
     end
 end
 
@@ -332,7 +332,7 @@ function penalty!{T,N}(g, dp::AffinePenalty, ϕ_c::AbstractDeformation{T,N})
     penalty!(g, dp, ϕ_c.u)
 end
 
-function penalty!{T,N}(g, dp::AffinePenalty, u::AbstractArray{Vec{N,T},N})
+function penalty!{T,N}(g, dp::AffinePenalty, u::AbstractArray{SVector{N,T},N})
     F, λ = dp.F, dp.λ
     if λ == 0
         if g != nothing && !isempty(g)
@@ -347,7 +347,7 @@ function penalty!{T,N}(g, dp::AffinePenalty, u::AbstractArray{Vec{N,T},N})
     λ /= n
     if g != nothing && !isempty(g)
         λ2 = 2λ
-        du = convert_to_fixed(Vec{N,T}, dU, (n,))
+        du = convert_to_fixed(SVector{N,T}, dU, (n,))
         for j=1:n
             g[j] = λ2*du[j]
         end
@@ -402,11 +402,6 @@ function penalty!{D<:GridDeformation}(g, λt::Real, ϕs::Vector{D})
     end
     s
 end
-# Not needed on Julia 0.6, but on 0.5 this eliminates a bottleneck due to bad codegen
-Base.sumabs2{N,T}(v::Vec{N,T}) = _sumabs2(v.values)
-@inline _sumabs2(t) = (x = t[1]; __sumabs2(x*x, Base.tail(t)...))
-@inline __sumabs2(s, x, t...) = __sumabs2(s + x*x, t...)
-__sumabs2(s) = s
 
 function penalty!{T<:Number, D<:GridDeformation}(g::Array{T}, λt::Real, ϕs::Vector{D})
     N = ndims(first(ϕs))
@@ -431,11 +426,11 @@ function penalty{D<:GridDeformation}(λt::Real, ϕs::Vector{D})
 end
 
 function RegisterDeformation.convert_to_fixed{T,N,A,L}(::Type{GridDeformation{T,N,A,L}}, g::Array{T})
-    reinterpret(Vec{N,T}, g, (div(length(g), N),))
+    reinterpret(SVector{N,T}, g, (div(length(g), N),))
 end
 
 function vec2ϕs{T,N}(x::Array{T}, gridsize::NTuple{N,Int}, n, knots)
-    xr = RegisterDeformation.convert_to_fixed(Vec{N,T}, x, (gridsize..., n))
+    xr = RegisterDeformation.convert_to_fixed(SVector{N,T}, x, (gridsize..., n))
     colons = ntuple(d->Colon(), N)::NTuple{N,Colon}
     [GridDeformation(view(xr, colons..., i), knots) for i = 1:n]
 end
