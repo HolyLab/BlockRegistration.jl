@@ -9,6 +9,37 @@ using Compat
 
 export CenterIndexedArray
 
+## SymRange, an AbstractUnitRange that's symmetric around 0
+# These are used as indices for CenterIndexedArrays
+immutable SymRange <: AbstractUnitRange{Int}
+    n::Int  # goes from -n:n
+end
+
+Base.first(r::SymRange) = -r.n
+Base.last(r::SymRange) = r.n
+
+Base.start(r::SymRange) = first(r)
+Base.done(r::SymRange, i) = i == last(r) + 1
+
+Base.intersect(r::SymRange, s::SymRange) = SymRange(min(last(r), last(s)))
+
+@inline function Base.getindex(r::SymRange, s::SymRange)
+    @boundscheck checkbounds(r, s)
+    s
+end
+
+Base.promote_rule{UR<:AbstractUnitRange}(::Type{SymRange}, ::Type{UR}) =
+    UR
+Base.promote_rule{T2}(::Type{UnitRange{T2}}, ::Type{SymRange}) =
+    UnitRange{promote_type(T2, Int)}
+function Base.convert(::Type{SymRange}, r::AbstractUnitRange)
+    first(r) == -last(r) || error("cannot convert $r to a SymRange")
+    SymRange(last(r))
+end
+
+Base.show(io::IO, r::SymRange) = print(io, "SymRange(", repr(last(r)), ')')
+
+
 """
 A `CenterIndexedArray` is one for which the array center has indexes
 `0,0,...`. Along each coordinate, allowed indexes range from `-n:n`.
@@ -33,10 +64,14 @@ CenterIndexedArray{T}(::Type{T}, dims...) = CenterIndexedArray(Array{T}(dims))
 @compat Base.IndexStyle{A<:CenterIndexedArray}(::Type{A}) = IndexCartesian()
 
 Base.size(A::CenterIndexedArray) = size(A.data)
-Base.indices(A::CenterIndexedArray) = map(n->(-n:n), A.halfsize)
+Base.indices(A::CenterIndexedArray) = map(SymRange, A.halfsize)
 
-function Base.similar{T}(A::CenterIndexedArray, ::Type{T}, inds::Tuple{UnitRange,Vararg{UnitRange}})
+function Base.similar{T}(A::CenterIndexedArray, ::Type{T}, inds::Tuple{SymRange,Vararg{SymRange}})
     data = Array{T}(map(length, inds))
+    CenterIndexedArray(data)
+end
+function Base.similar(T::Union{Type,Function}, inds::Tuple{SymRange, Vararg{SymRange}})
+    data = T(map(length, inds))
     CenterIndexedArray(data)
 end
 
@@ -59,9 +94,9 @@ Base.getindex{T}(A::CenterIndexedArray{T,1}, I::Index) = CenterIndexedArray([A[i
 Base.getindex{T}(A::CenterIndexedArray{T,2}, I::Index, J::Index) = CenterIndexedArray([A[i,j] for i in _cindex(A,1,I), j in _cindex(A,2,J)])
 Base.getindex{T}(A::CenterIndexedArray{T,3}, I::Index, J::Index, K::Index) = CenterIndexedArray([A[i,j,k] for i in _cindex(A,1,I), j in _cindex(A,2,J), k in _cindex(A,3,K)])
 
-_cindex(A::CenterIndexedArray, d, I::Range) = first(I) == -last(I) ? I : error("Must be symmetric around zero")
+_cindex(A::CenterIndexedArray, d, I::Range) = convert(SymRange, I)
 _cindex(A::CenterIndexedArray, d, I::AbstractVector) = error("unsupported, use a range")
-_cindex(A::CenterIndexedArray, d, ::Colon) = -A.halfsize[d]:A.halfsize[d]
+_cindex(A::CenterIndexedArray, d, ::Colon) = SymRange(A.halfsize[d])
 
 
 @inline function Base.setindex!{T,N}(A::CenterIndexedArray{T,N}, v, i::Vararg{Number,N})
