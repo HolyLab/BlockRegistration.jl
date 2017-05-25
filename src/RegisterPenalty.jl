@@ -219,7 +219,7 @@ function penalty_nd!(gnd, u::AbstractArray, mmis, keep)
     nanT = convert(T, NaN)
     local gtmp
     if calc_grad
-        gtmp = Array(NumDenom{T}, N)
+        gtmp = Vector{NumDenom{T}}(N)
     end
     for iblock = 1:length(mmis)
         mmi = mmis[iblock]
@@ -288,7 +288,7 @@ type AffinePenalty{T,N} <: DeformationPenalty{T,N}
 
     function (::Type{AffinePenalty{T,N}}){T,N}(knots::NTuple{N}, λ)
         gridsize = map(length, knots)
-        C = Array(Float64, prod(gridsize), N+1)
+        C = Matrix{Float64}(prod(gridsize), N+1)
         i = 0
         for I in CartesianRange(gridsize)
             C[i+=1, N+1] = 1
@@ -352,7 +352,7 @@ function penalty!{T,N}(g, dp::AffinePenalty, u::AbstractArray{SVector{N,T},N})
             g[j] = λ2*du[j]
         end
     end
-    λ * sumabs2(dU)
+    λ * sum(abs2, dU)
 end
 
 function penalty!(g, dp::AffinePenalty, ϕ_c, g_c)
@@ -397,7 +397,7 @@ function penalty!{D<:GridDeformation}(g, λt::Real, ϕs::Vector{D})
             dv = λt*du
             g[goffset+k] -= dv
             g[goffset+ngrid+k] += dv
-            s += λt2*sumabs2(du)
+            s += λt2*sum(abs2, du)
         end
     end
     s
@@ -419,7 +419,7 @@ function penalty{D<:GridDeformation}(λt::Real, ϕs::Vector{D})
         ϕp = ϕs[i+1]
         for k = 1:ngrid
             du = ϕp.u[k] - ϕ.u[k]
-            s += λt2*sumabs2(du)
+            s += λt2*sum(abs2, du)
         end
     end
     s

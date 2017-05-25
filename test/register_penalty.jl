@@ -14,29 +14,29 @@ dp = RegisterPenalty.AffinePenalty(knots, 1.0)
 @test typeof(dp) == RegisterPenalty.AffinePenalty{Float64, 2}
 # Since the constructor performs matrix algebra on an array input,
 # test that `convert` doesn't mangle F.
-@test_approx_eq_eps convert(RegisterPenalty.AffinePenalty{Float32,2}, dp).F dp.F 1e-7
+@test ≈(convert(RegisterPenalty.AffinePenalty{Float32,2}, dp).F, dp.F, atol=1e-7)
 
 # Zero penalty for translations
 ϕ_new = tform2deformation(tformtranslate([0.3,0.05]), imgsize, gridsize)
 ϕ_old = interpolate(tform2deformation(tformtranslate([0.1,0.2]),  imgsize, gridsize))
 g = similar(ϕ_new.u)
 @test @inferred(abs(RP.penalty!(g, dp, ϕ_new))) < 1e-12
-@test all(x->sum(abs(x)) < 1e-12, g)
+@test all(x->sum(abs, x) < 1e-12, g)
 ϕ_c, g_c = compose(ϕ_old, ϕ_new)
 @test @inferred(abs(RP.penalty!(g, dp, ϕ_c, g_c))) < 1e-12
-@test all(x->sum(abs(x)) < 1e-12, g)
+@test all(x->sum(abs, x) < 1e-12, g)
 
 # Zero penalty for rotations
 ϕ = tform2deformation(tformrotate(10pi/180), imgsize, gridsize)
 @test abs(RP.penalty!(g, dp, ϕ)) < 1e-12
-@test all(x->sum(abs(x)) < 1e-12, g)
+@test all(x->sum(abs, x) < 1e-12, g)
 
 # Zero penalty for stretch and skew
 A = 0.2*rand(2,2) + eye(2,2)
 tform = AffineTransform(A, Int[g>>1 for g in gridsize])
 ϕ = tform2deformation(tform, imgsize, gridsize)
 @test abs(RP.penalty!(g, dp, ϕ)) < 1e-12
-@test all(x->sum(abs(x)) < 1e-12, g)
+@test all(x->sum(abs, x) < 1e-12, g)
 
 # Random deformations & affine-residual penalty
 gridsize = (3,3)
@@ -52,7 +52,7 @@ for i in CartesianRange(gridsize)
         ud[j,i] = dual(u[j,i], 1)
         ϕd = GridDeformation(ud, imgsize)
         pd = RP.penalty!(nothing, dp, ϕd)
-        @test_approx_eq_eps g[i][j] epsilon(pd) 100*eps()
+        @test ≈(g[i][j], epsilon(pd), atol=100*eps())
     end
 end
 
@@ -67,7 +67,7 @@ for i in CartesianRange(gridsize)
         ud[j,i] = dual(u[j,i], 1)
         ϕd = interpolate(GridDeformation(ud, imgsize))
         pd = RP.penalty!(nothing, dp, ϕ_old(ϕd))
-        @test_approx_eq_eps g[i][j] epsilon(pd) 100*eps()
+        @test ≈(g[i][j], epsilon(pd), atol=100*eps())
     end
 end
 
@@ -86,12 +86,12 @@ mmi = RP.interpolate_mm!(mm, Quadratic(InPlaceQ()))
 mmi_array = typeof(mmi)[mmi]
 ϕ = GridDeformation(zeros(2, 1, 1), imgsize)
 g = similar(ϕ.u)
-fill!(g, 0)
+fill!(g, zero(eltype(g)))
 val = @inferred(RP.penalty!(g, ϕ, mmi_array))
-@test_approx_eq val (4-1.75)^4
-@test_approx_eq g[1][1] 2*(4-1.75)^3
+@test val ≈ (4-1.75)^4
+@test g[1][1] ≈ 2*(4-1.75)^3
 # Test at the minimum
-fill!(g, 0)
+fill!(g, zero(eltype(g)))
 ϕ = GridDeformation(reshape([-2.25,-2.25], (2,1,1)), imgsize)
 @test RP.penalty!(g, ϕ, mmi_array) < eps()
 @test abs(g[1][1]) < eps()
@@ -106,7 +106,7 @@ minrange = 1.6
 maxrange = Float64[2*m+1-0.6 for m in maxshift]
 dr = maxrange.-minrange
 c = dr.*rand(2, gridsize...).+minrange
-nums = Array(Matrix{Float64}, 2, 2)
+nums = Matrix{Matrix{Float64}}(2, 2)
 shiftsize = 2maxshift+1
 for j = 1:gridsize[2], i = 1:gridsize[1]
     p = [(x-c[1,i,j])^2 for x in 1:shiftsize[1]]
@@ -119,14 +119,14 @@ mmis = RP.interpolate_mm!(mms, Quadratic(InPlaceQ()))
 u_real = (dr.*rand(2, gridsize...).+minrange) .- Float64[m+1 for m in maxshift]  #zeros(size(c)...)
 ϕ = GridDeformation(u_real, imgsize)
 g = similar(ϕ.u)
-fill!(g, 0)
+fill!(g, zero(eltype(g)))
 val = @inferred(RP.penalty!(g, ϕ, mmis))
 nblocks = prod(gridsize)
 valpred = sum([prod([(maxshift[k]+1+u_real[k,i,j]-c[k,i,j])^2 for k = 1:2]) for i=1:gridsize[1],j=1:gridsize[2]])/nblocks
-@test_approx_eq val valpred
+@test val ≈ valpred
 for j = 1:gridsize[2], i = 1:gridsize[1]
-    @test_approx_eq_eps g[i,j][1] 2*(maxshift[1]+1+u_real[1,i,j]-c[1,i,j])*(maxshift[2]+1+u_real[2,i,j]-c[2,i,j])^2/nblocks 1000*eps()
-    @test_approx_eq_eps g[i,j][2] 2*(maxshift[1]+1+u_real[1,i,j]-c[1,i,j])^2*(maxshift[2]+1+u_real[2,i,j]-c[2,i,j])/nblocks 1000*eps()
+    @test ≈(g[i,j][1], 2*(maxshift[1]+1+u_real[1,i,j]-c[1,i,j])*(maxshift[2]+1+u_real[2,i,j]-c[2,i,j])^2/nblocks, atol=1000*eps())
+    @test ≈(g[i,j][2], 2*(maxshift[1]+1+u_real[1,i,j]-c[1,i,j])^2*(maxshift[2]+1+u_real[2,i,j]-c[2,i,j])/nblocks, atol=1000*eps())
 end
 
 
@@ -146,7 +146,7 @@ for nd = 1:3
     maxrange = Float64[2*m+1-0.6 for m in maxshift]
     dr = maxrange.-minrange
     c = dr.*rand(nd, gridsize...).+minrange
-    nums = Array(Array{Float64,nd}, gridsize)
+    nums = Array{Array{Float64,nd}}(gridsize)
     for I in CartesianRange(gridsize)
         n = 1
         for j = 1:nd
@@ -167,7 +167,7 @@ for nd = 1:3
     val = RP.penalty!(g, ϕ, identity, dp, mmis)
     @test abs(val) < 100*eps()
     gr = reinterpret(Float64, g, (nd, length(g)))
-    @test maximum(abs(gr)) < 100*eps()
+    @test maximum(abs, gr) < 100*eps()
 
     # Test derivatives with no uold
     u_raw = dr.*rand(nd, gridsize...) .+ minrange .- maxshift .- 1  # a random location
@@ -176,14 +176,14 @@ for nd = 1:3
     valpred = sum(prod(dx.^2,1))/nblocks
     g = similar(ϕ.u)
     val0 = RP.penalty!(g, ϕ, identity, dp, mmis)
-    @test_approx_eq val0 valpred
+    @test val0 ≈ valpred
     for I in CartesianRange(gridsize)
         for idim = 1:nd
             gpred = 2/nblocks
             for jdim = 1:nd
                 gpred *= (jdim==idim) ? dx[jdim, I] : dx[jdim, I]^2
             end
-            @test_approx_eq_eps g[I][idim] gpred 1000*eps()
+            @test ≈(g[I][idim], gpred, atol=1000*eps())
         end
     end
     # set lambda so the volume and data penalties contribute equally
@@ -191,13 +191,13 @@ for nd = 1:3
     p = RP.penalty!(nothing, dp, ϕ)
     dp.λ = val0/p
     val = RP.penalty!(g, ϕ, identity, dp, mmis)
-    @test_approx_eq val 2val0
+    @test val ≈ 2val0
     for i in CartesianRange(gridsize)
         for idim = 1:nd
             ud = convert(Array{Dual{Float64}}, u_raw)
             ud[idim,i] = dual(u_raw[idim,i], 1)
             vald = RP.penalty!(nothing, GridDeformation(ud, imgsize), identity, dp, mmis)
-            @test_approx_eq_eps g[i][idim] epsilon(vald) 1e-10
+            @test ≈(g[i][idim], epsilon(vald), atol=1e-10)
         end
     end
 
@@ -210,7 +210,7 @@ for nd = 1:3
             ud = convert(Array{Dual{Float64}}, u_raw)
             ud[idim,i] = dual(u_raw[idim,i], 1)
             vald = RP.penalty!(nothing, GridDeformation(ud, imgsize), ϕ_old, dp, mmis)
-            @test_approx_eq_eps g[i][idim] epsilon(vald) 1e-12
+            @test ≈(g[i][idim], epsilon(vald), atol=1e-12)
         end
     end
 
@@ -230,7 +230,7 @@ cnvt = x->RegisterPenalty.vec2ϕs(x, gsize, n, knots)
 g = similar(x)
 val = RegisterPenalty.penalty!(g, 1.0, ϕs)
 gfx = ForwardDiff.gradient(x->RegisterPenalty.penalty(1.0, cnvt(x)), x)
-@test_approx_eq vec(g) gfx
+@test vec(g) ≈ gfx
 
 ### Total penalty, with a temporal penalty
 Qs = cat(3, eye(2,2), zeros(2,2), eye(2,2))
@@ -259,4 +259,4 @@ function similarϕ{Tϕ,N,A,L,Tx}(ϕs::Vector{GridDeformation{Tϕ,N,A,L}}, x::Arr
     [GridDeformation(xf[colons..., i], ϕs[i].knots) for i = 1:length(ϕs)]
 end
 gcmp = ForwardDiff.gradient(x->pfun(x, ϕs, ap, λt, mmis), vec(u))
-@test_approx_eq vec(g) gcmp
+@test vec(g) ≈ gcmp

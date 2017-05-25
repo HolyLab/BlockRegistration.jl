@@ -136,25 +136,25 @@ end
 
 function RigidValue{T<:Real}(fixed::AbstractArray, moving::AbstractArray{T}, SD, thresh)
     f = copy(fixed)
-    fnan = isnan(f)
+    fnan = isnan.(f)
     f[fnan] = 0
     m = copy(moving)
-    mnan = isnan(m)
+    mnan = isnan.(m)
     m[mnan] = 0
     metp = extrapolate(interpolate!(m, BSpline(Quadratic(InPlace())), OnCell()), NaN)
-    RigidValue{ndims(f),typeof(f),typeof(metp),typeof(SD)}(f, !fnan, metp, SD, thresh)
+    RigidValue{ndims(f),typeof(f),typeof(metp),typeof(SD)}(f, map(!, fnan), metp, SD, thresh)
 end
 
 function (d::RigidValue)(x)
     tfm = p2rigid(x, d.SD)
     mov = transform(d.moving, tfm)
-    movnan = isnan(mov)
+    movnan = isnan.(mov)
     mov[movnan] = 0
-    f = d.fixed.*!movnan
+    f = d.fixed.*map(!, movnan)
     m = mov.*d.wfixed
-    den = sumabs2(f)+sumabs2(m)
+    den = sum(abs2, f) + sum(abs2, m)
     real(den) < d.thresh && return convert(typeof(den), Inf)
-    sumabs2(f-m)/den
+    sum(abs2, f-m)/den
 end
 
 type RigidOpt{RV<:RigidValue,G} <: GradOnlyBoundsOnly
@@ -532,7 +532,7 @@ function u_as_vec{D<:GridDeformation}(ϕs::Vector{D})
     N = ndims(D)
     ngrid = length(first(ϕs).u)
     n = N*ngrid
-    uvec = Array(T, n*length(ϕs))
+    uvec = Vector{T}(n*length(ϕs))
     for (i, ϕ) in enumerate(ϕs)
         copy!(uvec, (i-1)*n+1, reinterpret(T, ϕ.u, (n,)), 1, n)
     end
@@ -801,7 +801,7 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     ϕap = GridDeformation(u0, knots)
     ϕap, penaltyap = optimizer!(ϕap, mu_init)
     n = ceil(Int, log2(λmax) - log2(λmin))
-    λ_all = Array(typeof(λmin), n)
+    λ_all = Vector{typeof(λmin)}(n)
     penalty_all = similar(λ_all, typeof(penaltyprev))
     datapenalty_all = similar(penalty_all)
     ϕ_all = Any[]
@@ -868,8 +868,8 @@ function auto_λt(Es, cs, Qs, ap, λtrange)
     Esum = sum(Es)
     λt = first(λtrange)
     n = ceil(Int, log2(last(λtrange)) - log2(λt))
-    datapenalty = Array(typeof(Esum), n)
-    λts = Array(typeof(λt), n)
+    datapenalty = Vector{typeof(Esum)}(n)
+    λts = Vector{typeof(λt)}(n)
     @showprogress 1 "Calculating quadratic penalty as a function of λt: " for λindex = 1:n
         λts[λindex] = λt
         u0, isconverged = initial_deformation(ap, λt, cs, Qs)

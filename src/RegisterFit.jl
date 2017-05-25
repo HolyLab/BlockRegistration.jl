@@ -68,8 +68,8 @@ function mismatch2affine(mms, thresh, knots)
     TFT = typeof(one(T)/2)  # transformtype; it needs to be a floating-point type
     n = prod(gridsize)
     # Fit the parameters of each quadratic
-    u0 = Array(Any, n)
-    Q =  Array(Any, n)
+    u0 = Vector{Any}(n)
+    Q =  Vector{Any}(n)
     i = 0
     nnz = 0
     nreps = 0
@@ -91,7 +91,7 @@ function mismatch2affine(mms, thresh, knots)
         error("Decreased threshold by factor of 8, but it still wasn't enough to avoid degeneracy. It's likely there is a problem with thresh or the mismatch data.")
     end
     # Solve the global sum-over-quadratics problem
-    x = Array(Vector{TFT}, n)   # knot
+    x = Vector{Vector{TFT}}(n)   # knot
     center = convert(Vector{TFT}, ([arraysize(knots)...] .+ 1)/2)
     for (i,c) in eachknot(knots)
         x[i] = convert(Vector{TFT}, c) - center
@@ -220,38 +220,49 @@ end
 image `img`.  `center` is the centroid of intensity, and `cov` the
 covariance matrix of the intensity.
 """
-@generated function principalaxes{T,N}(img::AbstractArray{T,N})
-    quote
-        Ts = typeof(zero(T)/1)
-        psums = Vector{Ts}[zeros(Ts, size(img, d)) for d = 1:N]  # partial sums along all but one axis
-        # Use a two-pass algorithm
-        # First the partial sums, which we use to compute the centroid
-        @nloops $N I img begin
-            @inbounds v = @nref $N img I
-            if !isnan(v)
-                @inbounds (@nexprs $N d->(psums[d][I_d] += v))
+function principalaxes{T,N}(img::AbstractArray{T,N})
+    Ts = typeof(zero(T)/1)
+    psums = pa_init(Ts, size(img))   # partial sums along all but one axis
+    # Use a two-pass algorithm
+    # First the partial sums, which we use to compute the centroid
+    for I in CartesianRange(indices(img))
+        @inbounds v = img[I]
+        if !isnan(v)
+            @inbounds for d = 1:N
+                psums[d][I[d]] += v
             end
         end
-        s = sum(psums[1])
-        pmeans = Ts[sum(psums[d] .* (1:length(psums[d]))) for d = 1:N]
-        @nexprs $N d->(m_d = pmeans[d]/s)
-        # Now the variance
-        @nexprs $N j->(@nexprs $N i->(i >= j ? V_i_j = zero(Ts) : nothing))  # will hold intensity-weighted variance
-        @nloops $N I img begin
-            @inbounds v = @nref $N img I
-            if !isnan(v)
-                @nexprs $N j->(@nexprs $N i->(i > j ? V_i_j += v*(I_i-m_i)*(I_j-m_j) : nothing))
-            end
-        end
-        @nexprs $N d->(V_d_d = sum(psums[d] .* ((1:length(psums[d]))-m_d).^2))
-        @nexprs $N j->(@nexprs $N i->(i >= j ? V_i_j /= s : nothing))
-        # Package for output
-        center = Array(Ts, N)
-        cov = Array(Ts, N, N)
-        @nexprs $N d->(center[d] = m_d)
-        @nexprs $N j->(@nexprs $N i->(cov[i,j] = i >= j ? V_i_j : V_j_i))
-        center, cov
     end
+    s, m = pa_centroid(psums)
+    # Now the variance
+    cov = zeros(Ts, N, N)
+    for I in CartesianRange(indices(img))
+        @inbounds v = img[I]
+        if !isnan(v)
+            for j = 1:N
+                Δj = I[j] - m[j]
+                for i = j+1:N
+                    cov[i, j] += v * (I[i]-m[i]) * Δj
+                end
+            end
+        end
+    end
+    for d = 1:N
+        cov[d, d] = sum(psums[d] .* ((1:length(psums[d]))-m[d]).^2)
+    end
+    for j = 1:N, i = j:N
+        cov[i, j] /= s
+    end
+    for j = 1:N, i = 1:j-1
+        cov[i, j] = cov[j, i]
+    end
+    m, cov
+end
+
+@noinline pa_init{S}(::Type{S}, sz) = [zeros(S, s) for s in sz]
+@noinline function pa_centroid{S}(psums::Vector{Vector{S}})
+    s = sum(psums[1])
+    s, S[sum(psums[d] .* (1:length(psums[d]))) for d = 1:length(psums)] / s
 end
 
 """
@@ -343,7 +354,7 @@ end
         end
         @nexprs $N i->(@nexprs $N j->j<i?(dE[i,j] = dE_j_i; V4[i,j] = V4_j_i):(dE[i,j] = dE_i_j; V4[i,j] = V4_i_j))
         @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C[iter1,iter2,iter3,iter4] = C_iter1_iter2_iter3_iter4))))
-        sortindex = Array(Int, 4)
+        sortindex = Vector{Int}(4)
         for iter1 = 1:$N, iter2 = 1:$N, iter3 = 1:$N, iter4 = 1:$N
             sortindex[1] = iter1
             sortindex[2] = iter2
@@ -374,6 +385,10 @@ coordinate satisfies `|u[d]-u0[d]| <= maxsep[d]`. If `opt` is false,
 performance at the cost of accuracy.
 """
 function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
+    qfit(mm, thresh, maxsep, opt)
+end
+
+function qfit(mm::MismatchArray, thresh::Real, maxsep, opt::Bool)
     T = eltype(eltype(mm))
     threshT = convert(T, thresh)
     d = ndims(mm)
@@ -397,7 +412,7 @@ function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
     for i = 1:d
         uout[i] -= (size(mm,i)+1)>>1
     end
-    dE = Array(T, d, d)
+    dE = Matrix{T}(d, d)
     V4 = similar(dE)
     C = zeros(T, d, d, d, d)
     qfit_core!(dE, V4, C, mm.data, thresh, umin, E0, maxsep)
@@ -408,19 +423,18 @@ function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
     M = real(sqrtm(V4))::Matrix{T}
     # Compute M\dE/M carefully:
     U, s, V = svd(M)
-    s1 = s[1]
-    sinv = T[v < sqrt(eps(T))*s1 ? zero(T) : 1/v for v in s]
+    sinv = sv_inv(T, s)
     Minv = V * Diagonal(sinv) * U'
     Q = Minv*dE*Minv
     opt || return E0, uout, Q
     local QL
     try
-        QL = full(ctranspose(chol(Hermitian(Q))))
+        QL = convert(Matrix{T}, ctranspose(chol(Hermitian(Q))))
     catch err
         if isa(err, LinAlg.PosDefException)
             warn("Fixing positive-definite exception:")
             @show V4 dE M Q
-            QL = full(chol(Q+T(0.001)*mean(diag(Q))*I, Val{:L}))
+            QL = convert(Matrix{T}, chol(Q+T(0.001)*mean(diag(Q))*I, Val{:L}))::Matrix{T}
         else
             rethrow(err)
         end
@@ -446,6 +460,11 @@ function qfit(mm::MismatchArray, thresh::Real; maxsep=size(mm), opt::Bool=true)
     end
     unpackL!(QL, results.zero)
     E0, uout, QL'*QL
+end
+
+@noinline function sv_inv{T}(::Type{T}, s)
+    s1 = s[1]
+    sinv = T[v < sqrt(eps(T))*s1 ? zero(T) : 1/v for v in s]
 end
 
 """

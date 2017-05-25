@@ -66,12 +66,12 @@ type CMStorage{T<:AbstractFloat,N}
     ifftfunc!::Function
     shiftindexes::Vector{Vector{Int}} # indexes for performing fftshift & snipping from -maxshift:maxshift
 
-    function CMStorage(::Type{T}, aperture_width::WidthLike, maxshift::DimsLike; flags=FFTW.ESTIMATE, timelimit=Inf, display=true)
+    function (::Type{CMStorage{T,N}}){T,N}(::Type{T}, aperture_width::WidthLike, maxshift::DimsLike; flags=FFTW.ESTIMATE, timelimit=Inf, display=true)
         blocksize = map(x->ceil(Int,x), aperture_width)
         length(blocksize) == length(maxshift) || error("Dimensionality mismatch")
         padsz = padsize(blocksize, maxshift)
         padszt = tuple(padsz...)
-        padded = Array(T, padszt)
+        padded = Array{T}(padszt)
         getindexes = padranges(blocksize, maxshift)
         maxshiftv = [maxshift...]
         region = find(maxshiftv .> 0)
@@ -92,7 +92,7 @@ type CMStorage{T<:AbstractFloat,N}
             @printf("done (%.2f seconds)\n", dt)
         end
         shiftindexes = Vector{Int}[ [size(padded,i)+(-maxshift[i]+1:0); 1:maxshift[i]+1] for i = 1:length(maxshift) ]
-        new(Float64[aperture_width...], maxshiftv, getindexes, padded, fixed, moving, buf1, buf2, fftfunc, ifftfunc, shiftindexes)
+        new{T,N}(Float64[aperture_width...], maxshiftv, getindexes, padded, fixed, moving, buf1, buf2, fftfunc, ifftfunc, shiftindexes)
     end
 end
 CMStorage{T<:Real}(::Type{T}, aperture_width, maxshift; kwargs...) = CMStorage{T,length(aperture_width)}(T, aperture_width, maxshift; kwargs...)

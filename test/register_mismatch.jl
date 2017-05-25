@@ -30,8 +30,8 @@ mm = CenterIndexedArray(mma)
 RegisterMismatch.correctbias!(mm)
 for I in eachindex(mm)
     mmI = mm[I]
-    @test_approx_eq mmI.num val.num
-    @test_approx_eq mmI.denom val.denom
+    @test mmI.num ≈ val.num
+    @test mmI.denom ≈ val.denom
 end
 # 3d
 mma = fill(val, 3, 3, 3)
@@ -43,8 +43,8 @@ mm = CenterIndexedArray(mma)
 RegisterMismatch.correctbias!(mm)
 for I in eachindex(mm)
     mmI = mm[I]
-    @test_approx_eq mmI.num val.num
-    @test_approx_eq mmI.denom val.denom
+    @test mmI.num ≈ val.num
+    @test mmI.denom ≈ val.denom
 end
 
 
@@ -78,13 +78,13 @@ for imsz in ((7,10), (6,5))
                 mmref[i,j] = sum(df.^2)
             end
             nrm = sum(Apad.^2)+sum(Bpad.^2)
-            @test_approx_eq_eps mmref.data num.data accuracy*nrm
-            @test_approx_eq_eps fill(nrm,size(denom)) denom.data accuracy*nrm
+            @test ≈(mmref.data, num.data, atol=accuracy*nrm)
+            @test ≈(fill(nrm,size(denom)), denom.data, atol=accuracy*nrm)
             # pixel normalization
             mm = RM.mismatch(Apad, Bpad, maxshift, normalization=:pixels)
             _, denom = RegisterCore.separate(mm)
-            n = Vector{Int}[size(Apad,i).-abs(-maxshift[i]:maxshift[i]) for i = 1:2]
-            @test_approx_eq_eps denom.data n[1].*n[2]' accuracy*maximum(denom)
+            n = Vector{Int}[size(Apad,i).-abs.(-maxshift[i]:maxshift[i]) for i = 1:2]
+            @test ≈(denom.data, n[1].*n[2]', atol=accuracy*maximum(denom))
         end
     end
 end
@@ -94,18 +94,18 @@ C = rand(7,9)
 D = rand(7,9)
 mm = RegisterMismatch.mismatch(C, D, (3,3))
 nd = RegisterMismatch.mismatch0(C, D)
-@test_approx_eq mm[0,0].num nd.num
-@test_approx_eq mm[0,0].denom nd.denom
+@test mm[0,0].num ≈ nd.num
+@test mm[0,0].denom ≈ nd.denom
 mm = RegisterMismatch.mismatch(C, D, (3,3), normalization=:pixels)
 nd = RegisterMismatch.mismatch0(C, D, normalization=:pixels)
-@test_approx_eq mm[0,0].num nd.num
-@test_approx_eq mm[0,0].denom nd.denom
+@test mm[0,0].num ≈ nd.num
+@test mm[0,0].denom ≈ nd.denom
 
 mms = RegisterMismatch.mismatch_apertures(C, D, (2,2), (3,2), normalization=:intensity)
 nd0 = RegisterMismatch.mismatch0(C, D)
 nd1 = RegisterMismatch.mismatch0(mms)
-@test_approx_eq nd0.num nd1.num
-@test_approx_eq nd0.denom nd1.denom
+@test nd0.num ≈ nd1.num
+@test nd0.denom ≈ nd1.denom
 
 # Now do it for block mismatch
 # A key property we're testing here is that
@@ -129,14 +129,14 @@ for imsz in ((15,16), (14,17))
                     mm[i,j] = sum(df.^2)
                 end
                 nrm = sum(Apad.^2)+sum(Bpad.^2)
-                @test_approx_eq_eps mm.data num.data accuracy*nrm
-                @test_approx_eq_eps fill(nrm,size(denom)) denom.data accuracy*nrm
+                @test ≈(mm.data, num.data, atol=accuracy*nrm)
+                @test ≈(fill(nrm,size(denom)), denom.data, atol=accuracy*nrm)
                 # pixel normalization
                 mms = RM.mismatch_apertures(Float64, Apad, Bpad, gridsize, maxshift, normalization=:pixels, display=false)
                 _, denoms = RegisterCore.separate(mms)
                 denom = sum(denoms)
-                n = Vector{Int}[size(Apad,i).-abs(-maxshift[i]:maxshift[i]) for i = 1:2]
-                @test_approx_eq_eps denom.data n[1].*n[2]' accuracy*maximum(denom)
+                n = Vector{Int}[size(Apad,i).-abs.(-maxshift[i]:maxshift[i]) for i = 1:2]
+                @test ≈(denom.data, n[1].*n[2]', atol=accuracy*maximum(denom))
             end
         end
     end
@@ -155,15 +155,15 @@ for RM in RMlist
         mmref[i,j,k] = sum(df.^2)
     end
     nrm = sum(Apad.^2)+sum(Bpad.^2)
-    @test_approx_eq_eps mmref.data num.data accuracy*nrm
-    @test_approx_eq_eps fill(nrm,size(denom)) denom.data accuracy*nrm
+    @test ≈(mmref.data, num.data, atol=accuracy*nrm)
+    @test ≈(fill(nrm,size(denom)), denom.data, atol=accuracy*nrm)
 
     mms = RM.mismatch_apertures(Apad, Bpad, (2,3,2),[4,3,2], normalization=:intensity, display=false)
     nums, denoms = RegisterCore.separate(mms)
     num = sum(nums)
     denom = sum(denoms)
-    @test_approx_eq_eps mmref.data num.data accuracy*nrm
-    @test_approx_eq_eps fill(sum(Apad.^2)+sum(Bpad.^2),size(denom)) denom.data accuracy*nrm
+    @test ≈(mmref.data, num.data, atol=accuracy*nrm)
+    @test ≈(fill(sum(Apad.^2)+sum(Bpad.^2),size(denom)), denom.data, atol=accuracy*nrm)
 end
 
 
@@ -173,7 +173,7 @@ RM = RegisterMismatch
 A = fill(7, 8, 4)
 Ahp = RM.highpass(Float32, A, (1,1))
 @test eltype(Ahp) == Float32
-@test maximum(abs(Ahp)) < 100*eps(Float32)
+@test maximum(abs.(Ahp)) < 100*eps(Float32)
 Ahp = RM.highpass(A, (1.2,Inf))
 @test A == Ahp
 

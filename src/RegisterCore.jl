@@ -277,7 +277,7 @@ function mismatcharrays{A<:AbstractArray,T<:Number}(nums::AbstractArray{A}, deno
         num = nums[i]
         mm = MismatchArray(num, denom)
         if first
-            mms = Array(typeof(mm), size(nums))
+            mms = Array{typeof(mm)}(size(nums))
             first = false
         end
         mms[i] = mm
@@ -292,7 +292,7 @@ function mismatcharrays{A1<:AbstractArray,A2<:AbstractArray}(nums::AbstractArray
     for i in eachindex(nums, denoms)
         mm = MismatchArray(nums[i], denoms[i])
         if first
-            mms = Array(typeof(mm), size(nums))
+            mms = Array{typeof(mm)}(size(nums))
             first = false
         end
         mms[i] = mm
@@ -305,7 +305,7 @@ end
 numerator and denominator arrays.
 """
 function separate{T}(data::AbstractArray{NumDenom{T}})
-    num = Array(T, size(data))
+    num = Array{T}(size(data))
     denom = similar(num)
     for I in eachindex(data)
         nd = data[I]
@@ -322,7 +322,7 @@ end
 
 function separate{M<:MismatchArray}(mma::AbstractArray{M})
     T = eltype(eltype(M))
-    nums = Array(CenterIndexedArray{T,ndims(M)}, size(mma))
+    nums = Array{CenterIndexedArray{T,ndims(M)}}(size(mma))
     denoms = similar(nums)
     for (i,mm) in enumerate(mma)
         nums[i], denoms[i] = separate(mm)

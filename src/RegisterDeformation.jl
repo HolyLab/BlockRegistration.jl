@@ -2,11 +2,13 @@ __precompile__()
 
 module RegisterDeformation
 
-using Images, AffineTransforms, Interpolations, ColorTypes, StaticArrays, HDF5, JLD, ProgressMeter
+using Images, Interpolations, ColorTypes, StaticArrays, HDF5, JLD, ProgressMeter
 using RegisterUtilities
 using Base: Cartesian, tail
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
 import ImageTransformations: warp, warp!
+# to avoid `scale` conflict:
+using AffineTransforms: AffineTransform, TransformedArray
 using Compat
 
 export
@@ -113,7 +115,7 @@ end
 
 # Ambiguity avoidance
 function GridDeformation{FV<:SVector,N}(u::AbstractArray{FV,N},
-                                            knots::Tuple{})
+                                        knots::Tuple{})
     error("Cannot supply an empty knot tuple")
 end
 
@@ -131,11 +133,11 @@ function GridDeformation{FV<:SVector,N,L<:Integer}(u::AbstractArray{FV,N},
     T = eltype(FV)
     length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires SVector{$N,T}"))
     knots = ntuple(d->linspace(1,dims[d],size(u,d)), N)
-    GridDeformation{T,N,typeof(u),LinSpace{Float64}}(u, knots)
+    GridDeformation{T,N,typeof(u),typeof(knots[1])}(u, knots)
 end
 
 # Construct from a plain array
-function GridDeformation{T<:Number,N}(u::Array{T}, knots::NTuple{N})
+function GridDeformation{T<:Number,N}(u::AbstractArray{T}, knots::NTuple{N})
     ndims(u) == N+1 || error("Need $(N+1) dimensions for $N-dimensional deformations")
     size(u,1) == N || error("First dimension of u must be of length $N")
     uf = convert_to_fixed(SVector{N,T}, u, tail(size(u)))
@@ -143,7 +145,7 @@ function GridDeformation{T<:Number,N}(u::Array{T}, knots::NTuple{N})
 end
 
 # Construct from a (u1, u2, ...) tuple
-function GridDeformation{N}(u::NTuple{N}, knots::NTuple{N})
+function GridDeformation{N}(u::NTuple{N,AbstractArray}, knots::NTuple{N})
     ndims(u[1]) == N || error("Need $N dimensions for $N-dimensional deformations")
     ua = permutedims(cat(N+1, u...), (N+1,(1:N)...))
     uf = convert_to_fixed(ua)
@@ -325,7 +327,7 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(ϕ_old::GridDeformation{T1,N,
     x = knot(knots, 1)
     out = _compose(u, unew, x, 1)
     ucomp = similar(u, typeof(out))
-    TG = similar_type(SArray, Size(N, N), eltype(out))
+    TG = similar_type(SArray, eltype(out), Size(N, N))
     g = Array{TG}(size(u))
     gtmp = Vector{typeof(out)}(N)
     eyeN = eye(TG)
@@ -361,7 +363,7 @@ end
 
 function compose{T,N}(f::Function, ϕ_new::GridDeformation{T,N})
     f == identity || error("Only the identity function is supported")
-    ϕ_new, fill(eye(similar_type(SArray, Size(N, N), T)), size(ϕ_new.u))
+    ϕ_new, fill(eye(similar_type(SArray, T, Size(N, N))), size(ϕ_new.u))
 end
 
 function medfilt{D<:AbstractDeformation}(ϕs::AbstractVector{D}, n)
@@ -621,8 +623,8 @@ function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     for p in wpids
         remotecall_fetch(Main.eval, p, :(push!(LOAD_PATH, $mydir)))
         remotecall_fetch(Main.eval, p, :(using RegisterDeformation))
-        push!(simg, SharedArray(eltype(img), ssz, pids=[myid(),p]))
-        push!(swarped, SharedArray(T, ssz, pids=[myid(),p]))
+        push!(simg, SharedArray{eltype(img)}(ssz, pids=[myid(),p]))
+        push!(swarped, SharedArray{T}(ssz, pids=[myid(),p]))
     end
     nextidx = 0
     getnextidx() = nextidx += 1
@@ -713,7 +715,7 @@ function knotgrid{T,N}(::Type{T}, knots::NTuple{N,Range})
     fill!(img, zero(T))
     for idim = 1:N
         indexes = Any[inds...]
-        indexes[idim] = clamp(round(Int, knots[idim]), first(inds[idim])+1, last(inds[idim])-1)
+        indexes[idim] = map(x->clamp(round(Int, x), first(inds[idim])+1, last(inds[idim])-1), knots[idim])
         img[indexes...] = one(T)
     end
     img
@@ -802,7 +804,7 @@ function JLD.readas{T,DT}(serdata::ArraySArraySerializer{T,1,DT})
 end
 function JLD.readas{T,DT}(serdata::ArraySArraySerializer{T,2,DT})
     sz = size(serdata.A)
-    reinterpret(similar_type(SArray,Size(sz[1],sz[2]),T), serdata.A, tail(tail(sz)))
+    reinterpret(similar_type(SArray,T,Size(sz[1],sz[2])), serdata.A, tail(tail(sz)))
 end
 
 function JLD.writeas{FSA<:StaticArray}(A::Array{FSA})
@@ -871,10 +873,18 @@ function convert_from_fixed{N,T}(uf::AbstractArray{SVector{N,T}}, sz=size(uf))
     u
 end
 
-# Note this is a bit unsafe as it requires the user to specify C correctly
-@generated function Base.convert{R,C,T}(::Type{Mat{R,C,T}}, v::Vector{SVector{R,T}})
-    args = [:(Tuple(v[$d])) for d = 1:C]
-    :(Mat{R,C,T}(($(args...),)))
+# # Note this is a bit unsafe as it requires the user to specify C correctly
+# @generated function Base.convert{R,C,T}(::Type{SMatrix{Tuple{R,C},T}}, v::Vector{SVector{R,T}})
+#     args = [:(Tuple(v[$d])) for d = 1:C]
+#     :(SMatrix{Tuple{R,C},T}(($(args...),)))
+# end
+
+if VERSION >= v"0.6.0-rc2"
+    include_string("""
+    const RowVectorArray{T} = RowVector{T,Vector{T}}
+
+    Base.reinterpret{T,S,N}(::Type{T}, r::RowVectorArray{S}, dims::Dims{N}) = reinterpret(T, r.vec, dims)
+    """)
 end
 
 end  # module
