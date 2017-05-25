@@ -325,7 +325,7 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(ϕ_old::GridDeformation{T1,N,
     x = knot(knots, 1)
     out = _compose(u, unew, x, 1)
     ucomp = similar(u, typeof(out))
-    TG = similar_type(SArray, eltype(out), Size(N, N))
+    TG = similar_type(SArray, Size(N, N), eltype(out))
     g = Array{TG}(size(u))
     gtmp = Vector{typeof(out)}(N)
     eyeN = eye(TG)
@@ -361,7 +361,7 @@ end
 
 function compose{T,N}(f::Function, ϕ_new::GridDeformation{T,N})
     f == identity || error("Only the identity function is supported")
-    ϕ_new, fill(eye(similar_type(SArray, T, Size(N, N))), size(ϕ_new.u))
+    ϕ_new, fill(eye(similar_type(SArray, Size(N, N), T)), size(ϕ_new.u))
 end
 
 function medfilt{D<:AbstractDeformation}(ϕs::AbstractVector{D}, n)
@@ -802,7 +802,7 @@ function JLD.readas{T,DT}(serdata::ArraySArraySerializer{T,1,DT})
 end
 function JLD.readas{T,DT}(serdata::ArraySArraySerializer{T,2,DT})
     sz = size(serdata.A)
-    reinterpret(similar_type(SArray,T,Size(sz[1],sz[2])), serdata.A, tail(tail(sz)))
+    reinterpret(similar_type(SArray,Size(sz[1],sz[2]),T), serdata.A, tail(tail(sz)))
 end
 
 function JLD.writeas{FSA<:StaticArray}(A::Array{FSA})

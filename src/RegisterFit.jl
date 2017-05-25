@@ -189,8 +189,8 @@ within the allowed domain.
 """
 function uisvalid{T<:Number}(u::AbstractArray{T}, maxshift)
     nd = size(u,1)
-    nblocks = div(length(u), nd)
-    for j = 1:nblocks, idim = 1:nd
+    sztail = Base.tail(size(u))
+    for j in CartesianRange(sztail), idim = 1:nd
         if abs(u[idim,j]) >= maxshift[idim]-register_half
             return false
         end
@@ -203,8 +203,8 @@ end
 """
 function uclamp!{T<:Number}(u::AbstractArray{T}, maxshift)
     nd = size(u,1)
-    nblocks = div(length(u), nd)
-    for j = 1:nblocks, idim = 1:nd
+    sztail = Base.tail(size(u))
+    for j in CartesianRange(sztail), idim = 1:nd
         u[idim,j] = max(-maxshift[idim]+register_half_safe, min(u[idim,j], maxshift[idim]-register_half_safe))
     end
     u

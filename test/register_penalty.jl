@@ -46,7 +46,7 @@ u = randn(2, gridsize...)
 ϕ = GridDeformation(u, imgsize)
 g = similar(ϕ.u)
 @inferred(RP.penalty!(g, dp, ϕ))
-for i = 1:prod(gridsize)
+for i in CartesianRange(gridsize)
     for j = 1:2
         ud = dual.(u)
         ud[j,i] = dual(u[j,i], 1)
@@ -61,7 +61,7 @@ uold = randn(2, gridsize...)
 ϕ_old = interpolate(GridDeformation(uold, imgsize))
 ϕ_c, g_c = compose(ϕ_old, ϕ)
 RP.penalty!(g, dp, ϕ_c, g_c)
-for i = 1:prod(gridsize)
+for i in CartesianRange(gridsize)
     for j = 1:2
         ud = dual.(u)
         ud[j,i] = dual(u[j,i], 1)
@@ -192,7 +192,7 @@ for nd = 1:3
     dp.λ = val0/p
     val = RP.penalty!(g, ϕ, identity, dp, mmis)
     @test_approx_eq val 2val0
-    for i = 1:prod(gridsize)
+    for i in CartesianRange(gridsize)
         for idim = 1:nd
             ud = convert(Array{Dual{Float64}}, u_raw)
             ud[idim,i] = dual(u_raw[idim,i], 1)
@@ -205,7 +205,7 @@ for nd = 1:3
     uold = dr.*rand(nd, gridsize...) .+ minrange .- maxshift .- 1
     ϕ_old = interpolate(GridDeformation(uold, imgsize))
     val = RP.penalty!(g, ϕ, ϕ_old, dp, mmis)
-    for i = 1:prod(gridsize)
+    for i in CartesianRange(gridsize)
         for idim = 1:nd
             ud = convert(Array{Dual{Float64}}, u_raw)
             ud[idim,i] = dual(u_raw[idim,i], 1)

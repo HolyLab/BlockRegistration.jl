@@ -48,11 +48,12 @@ A single `CachedInterpolation` represents a "movable"
 i_2)`. An array of these objects thus implements an array-of-arrays
 interface. Create them with `cachedinterpolators`.
 """
-type CachedInterpolation{T,N,M,O} <: AbstractInterpolation{T,N,BSpline{Quadratic{InPlace}},OnCell}
+type CachedInterpolation{T,N,M,O,K} <: AbstractInterpolation{T,N,BSpline{Quadratic{InPlace}},OnCell}
+    # Note: M = N+K
     coefs::Array{T,M}   # tiled array of 3x3x... buffers
     parent::Array{T,M}  # the overall array (`P` in the documentation above)
     center::NTuple{N,Int}  # rounded (y_1, y_2) of prev. eval for this tile
-    tileindex::Int      # equivalent to sub2ind(size(P)[N+1:end], i_1, i_2, ...)
+    tileindex::CartesianIndex{K}
 end
 
 const splitN = Base.IteratorsMD.split
@@ -95,14 +96,14 @@ function cachedinterpolators{T,M}(parent::Array{T,M}, N, origin=ntuple(d->0,N))
     # use an impossible initial value (post-offset by origin) to
     # ensure the first access will result in a cache miss
     center = ntuple(d->-1, N)
-    _cachedinterpolators(buffer, parent, origin, center, sztiles)
+    cachedinterpolators(buffer, parent, origin, center, sztiles)
 end
 
 # function-barriered to circumvent type-instability in sztiles
-@noinline function _cachedinterpolators{T,N,M}(buffer::Array{T,M}, parent::Array{T,M}, origin::NTuple{N,Int}, center::NTuple{N,Int}, sztiles)
+@noinline function cachedinterpolators{T,N,M,K}(buffer::Array{T,M}, parent::Array{T,M}, origin::NTuple{N,Int}, center::NTuple{N,Int}, sztiles::NTuple{K,Int})
     itps = Array{CachedInterpolation{T,N,M,origin}}(sztiles)
-    for tileindex = 1:prod(sztiles)
-        itps[tileindex] = CachedInterpolation{T,N,M,origin}(buffer, parent, center, tileindex)
+    for tileindex in CartesianRange(sztiles)
+        itps[tileindex] = CachedInterpolation{T,N,M,origin,K}(buffer, parent, center, tileindex)
     end
     itps
 end
@@ -149,13 +150,12 @@ Base.size{N}(itp::CoefsWrapper{N}, d) = d <= N ? size(itp.coefs, d) : 1
 # update the cache. This is equivalent to the assumption you've called
 # getindex for the current `(x_1, x_2, ...)` location before calling
 # gradient!. If this is not true, you'll get wrong answers.
-@generated function Interpolations.gradient!{T,N,M,O}(g::AbstractVector, A::CachedInterpolation{T,N,M,O}, ys::Number...)
-    length(ys) == N || error("Must use $N indexes")
-    IT = Tuple{ntuple(d->BSpline{Quadratic{InPlace}}, N)..., NoInterp}
-    BS = Interpolations.BSplineInterpolation{T,N+1,Array{T,N},IT,OnCell,0}
+@generated function Interpolations.gradient!{T,N,M,O,K}(g::AbstractVector, A::CachedInterpolation{T,N,M,O,K}, ys::Vararg{Number,N})
+    IT = Tuple{ntuple(d->BSpline{Quadratic{InPlace}}, N)..., ntuple(d->NoInterp, K)...}
+    BS = Interpolations.BSplineInterpolation{T,M,Array{T,M},IT,OnCell,0}
     ex = Interpolations.gradient_impl(BS)
     quote
-        xs = @ntuple $(N+1) d->(d <= $N ? ys[d] - round(Int, ys[d]) + 2 : A.tileindex)
+        xs = @ntuple $M d->(d <= $N ? ys[d] - round(Int, ys[d]) + 2 : A.tileindex[d-$N])
         itp = CoefsWrapper{N,typeof(A.coefs)}(A.coefs)
         $ex
     end
