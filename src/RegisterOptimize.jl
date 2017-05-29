@@ -775,7 +775,7 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     λmin, λmax = λrange
     gridsize = map(length, knots)
     uc = zeros(T, N, gridsize...)
-    for i = 1:length(cs)
+    for i in CartesianRange(gridsize)
         uc[:,i] = convert(Vector{T}, cs[i])
     end
     function optimizer!(x, mu_init)
@@ -1106,7 +1106,7 @@ end
 
 function sigpenalty(x, data)
     bottom, top, center, width = x[1], x[2], x[3], x[4]
-    sumabs2((data-bottom)/(top-bottom) - 1./(1+exp(-(collect(1:length(data))-center)/width)))
+    sum(abs2, (data-bottom)/(top-bottom) - 1./(1+exp.(-(collect(1:length(data))-center)/width)))
 end
 
 @generated function RegisterCore.maxshift{T,N}(A::CachedInterpolation{T,N})
