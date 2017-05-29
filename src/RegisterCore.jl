@@ -419,7 +419,7 @@ function highpass{T}(::Type{T}, data::AbstractArray, sigma)
     if any(isinf, sigma)
         datahp = convert(Array{T,ndims(data)}, data)
     else
-        datahp = data - imfilter(T, data, KernelFactors.IIRGaussian(T, (sigma...,)))
+        datahp = data - imfilter(T, data, KernelFactors.IIRGaussian(T, (sigma...,)), NA())
     end
     datahp[datahp .< 0] = 0  # truncate anything below 0
     datahp

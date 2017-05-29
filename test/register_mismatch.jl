@@ -176,6 +176,14 @@ Ahp = RM.highpass(Float32, A, (1,1))
 @test maximum(abs.(Ahp)) < 100*eps(Float32)
 Ahp = RM.highpass(A, (1.2,Inf))
 @test A == Ahp
+A = Float64.(A)
+A[1,1] = NaN
+Ahp = RM.highpass(Float32, A, (1,1))
+@test sum(x->!isfinite(x), Ahp) == 1
+@test isnan(Ahp[1,1])
+Ahp[1,1] = 0
+@test maximum(abs, Ahp) < 3e-6
+
 
 num = float([1 2; 3 4])
 denom = [1 1e-6; 2 1]
