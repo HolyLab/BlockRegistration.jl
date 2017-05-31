@@ -18,8 +18,6 @@ else
     end
 end
 
-Pkg.checkout("CUDArt", "standalone")
-
 basedir = splitdir(splitdir(@__FILE__)[1])[1]
 cd(joinpath(basedir, "src")) do
     run(`make`)
