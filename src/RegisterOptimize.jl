@@ -2,10 +2,12 @@ __precompile__()
 
 module RegisterOptimize
 
-using MathProgBase, Ipopt, Optim, AffineTransforms, Interpolations, ForwardDiff, FixedSizeArrays, IterativeSolvers, ProgressMeter
+using MathProgBase, Ipopt, Optim, AffineTransforms, Interpolations, ForwardDiff, StaticArrays, IterativeSolvers, ProgressMeter
 using RegisterCore, RegisterDeformation, RegisterPenalty, RegisterFit, CachedInterpolations, CenterIndexedArrays
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base: Test, tail
+
+using Compat
 
 import Base: *
 
@@ -33,7 +35,7 @@ RegisterOptimize
 
 
 # Some conveniences for MathProgBase
-abstract GradOnly <: MathProgBase.AbstractNLPEvaluator
+@compat abstract type GradOnly <: MathProgBase.AbstractNLPEvaluator end
 
 function MathProgBase.initialize(d::GradOnly, requested_features::Vector{Symbol})
     for feat in requested_features
@@ -45,14 +47,14 @@ end
 MathProgBase.features_available(d::GradOnly) = [:Grad, :Jac]
 
 
-abstract GradOnlyBoundsOnly <: GradOnly
+@compat abstract type GradOnlyBoundsOnly <: GradOnly end
 
 MathProgBase.eval_g(::GradOnlyBoundsOnly, g, x) = nothing
 MathProgBase.jac_structure(::GradOnlyBoundsOnly) = Int[], Int[]
 MathProgBase.eval_jac_g(::GradOnlyBoundsOnly, J, x) = nothing
 
 
-abstract BoundsOnly <: MathProgBase.AbstractNLPEvaluator
+@compat abstract type BoundsOnly <: MathProgBase.AbstractNLPEvaluator end
 
 MathProgBase.eval_g(::BoundsOnly, g, x) = nothing
 MathProgBase.jac_structure(::BoundsOnly) = Int[], Int[]
@@ -134,25 +136,25 @@ end
 
 function RigidValue{T<:Real}(fixed::AbstractArray, moving::AbstractArray{T}, SD, thresh)
     f = copy(fixed)
-    fnan = isnan(f)
+    fnan = isnan.(f)
     f[fnan] = 0
     m = copy(moving)
-    mnan = isnan(m)
+    mnan = isnan.(m)
     m[mnan] = 0
     metp = extrapolate(interpolate!(m, BSpline(Quadratic(InPlace())), OnCell()), NaN)
-    RigidValue{ndims(f),typeof(f),typeof(metp),typeof(SD)}(f, !fnan, metp, SD, thresh)
+    RigidValue{ndims(f),typeof(f),typeof(metp),typeof(SD)}(f, map(!, fnan), metp, SD, thresh)
 end
 
 function (d::RigidValue)(x)
     tfm = p2rigid(x, d.SD)
     mov = transform(d.moving, tfm)
-    movnan = isnan(mov)
+    movnan = isnan.(mov)
     mov[movnan] = 0
-    f = d.fixed.*!movnan
+    f = d.fixed.*map(!, movnan)
     m = mov.*d.wfixed
-    den = sumabs2(f)+sumabs2(m)
+    den = sum(abs2, f) + sum(abs2, m)
     real(den) < d.thresh && return convert(typeof(den), Inf)
-    sumabs2(f-m)/den
+    sum(abs2, f-m)/den
 end
 
 type RigidOpt{RV<:RigidValue,G} <: GradOnlyBoundsOnly
@@ -195,7 +197,7 @@ end
 
 function _initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
     if ap.λ <= 0
-        return cs2u(Vec{N,T}, cs), true
+        return cs2u(SVector{N,T}, cs), true
     end
     b = prep_b(T, cs, Qs)
     # A = to_full(ap, Qs)
@@ -219,12 +221,12 @@ function _initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs)
         fill!(x, 0)
         isconverged = true
     end
-    convert_to_fixed(Vec{N,T}, x, size(cs)), isconverged
+    convert_to_fixed(SVector{N,T}, x, size(cs)), isconverged
 end
 
 cs2u{V}(::Type{V}, cs) = [V((c...)) for c in cs]
 
-function initial_deformation{T,N,V<:Vec,M<:Mat}(ap::AffinePenalty{T,N}, cs::AbstractArray{V}, Qs::AbstractArray{M})
+function initial_deformation{T,N,V<:SVector,M<:SMatrix}(ap::AffinePenalty{T,N}, cs::AbstractArray{V}, Qs::AbstractArray{M})
     Tv = eltype(V)
     eltype(M) == Tv || error("element types of cs ($(eltype(V))) and Qs ($(eltype(M))) must match")
     size(M,1) == size(M,2) == length(V) || throw(DimensionMismatch("size $(size(M)) of Qs matrices is inconsistent with cs vectors of size $(size(V))"))
@@ -258,7 +260,7 @@ end
 # Overloading setindex! for Vec introduces too many ambiguities,
 # so we define this instead.
 _copy!(dest, rng, src::AbstractVector) = dest[rng] = src
-function _copy!(dest, rng, src::Vec)
+function _copy!(dest, rng, src::SVector)
     for (idest, s) in zip(rng, src)
         dest[idest] = s
     end
@@ -271,14 +273,14 @@ function find_opt(P, b)
 end
 
 # A type for computing multiplication by the linear operator
-type AffineQHessian{AP<:AffinePenalty,M<:Mat,N,Φ}
+type AffineQHessian{AP<:AffinePenalty,M<:StaticMatrix,N,Φ}
     ap::AP
     Qs::Array{M,N}
     ϕ_old::Φ
 end
 
 function AffineQHessian{T,TQ,N}(ap::AffinePenalty{T}, Qs::AbstractArray{TQ,N}, ϕ_old)
-    AffineQHessian{typeof(ap),Mat{N,N,T},N,typeof(ϕ_old)}(ap, Qs, ϕ_old)
+    AffineQHessian{typeof(ap),similar_type(SArray,T,Size(N,N)),N,typeof(ϕ_old)}(ap, Qs, ϕ_old)
 end
 
 Base.eltype{AP,M,N,Φ}(::Type{AffineQHessian{AP,M,N,Φ}}) = eltype(AP)
@@ -289,7 +291,7 @@ Base.size(P::AffineQHessian, d) = length(P.Qs)*size(first(P.Qs),1)
 # for the objective in the doc text for initial_deformation.
 function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     gridsize = size(P.Qs)
-    u = convert_to_fixed(Vec{N,T}, x, size(P.Qs))
+    u = convert_to_fixed(SVector{N,T}, x, size(P.Qs))
     g = similar(u)
     λ = P.ap.λ
     nspatialgrid = size(P.ap.F, 1)
@@ -346,7 +348,7 @@ function initial_deformation{T,N}(ap::AffinePenalty{T,N}, cs, Qs, ϕ_old, maxshi
     x0 = find_opt(P0, b)
     P = AffineQHessian(ap, Qs, ϕ_old)
     x = find_opt(P, b, maxshift, x0)
-    u0 = convert_to_fixed(x, (N,size(cs)...)) #reinterpret(Vec{N,eltype(x)}, x, size(cs))
+    u0 = convert_to_fixed(x, (N,size(cs)...)) #reinterpret(SVector{N,eltype(x)}, x, size(cs))
 end
 
 # type for minimization with composition (which turns the problem into
@@ -382,8 +384,8 @@ MathProgBase.eval_f(d::InitialDefOpt, x::AbstractVector) =
 function _eval_f{T,N}(P::AffineQHessian{AffinePenalty{T,N}}, b, x::AbstractVector)
     gridsize = size(P.Qs)
     n = prod(gridsize)
-    u  = convert_to_fixed(x, (N,gridsize...))# reinterpret(Vec{N,T}, x, gridsize)
-    bf = convert_to_fixed(b, (N,gridsize...))# reinterpret(Vec{N,T}, b, gridsize)
+    u  = convert_to_fixed(x, (N,gridsize...))# reinterpret(SVector{N,T}, x, gridsize)
+    bf = convert_to_fixed(b, (N,gridsize...))# reinterpret(SVector{N,T}, b, gridsize)
     λ = P.ap.λ
     P.ap.λ = λ*n/2
     val = affine_part!(nothing, P, u)
@@ -516,7 +518,7 @@ function u_as_vec{T,N}(ϕ::GridDeformation{T,N})
 end
 
 function vec_as_u{T,N}(g::Array{T}, ϕ::GridDeformation{T,N})
-    reinterpret(Vec{N,T}, g, size(ϕ.u))
+    reinterpret(SVector{N,T}, g, size(ϕ.u))
 end
 
 function _copy!(ϕ::GridDeformation, x)
@@ -530,7 +532,7 @@ function u_as_vec{D<:GridDeformation}(ϕs::Vector{D})
     N = ndims(D)
     ngrid = length(first(ϕs).u)
     n = N*ngrid
-    uvec = Array(T, n*length(ϕs))
+    uvec = Vector{T}(n*length(ϕs))
     for (i, ϕ) in enumerate(ϕs)
         copy!(uvec, (i-1)*n+1, reinterpret(T, ϕ.u, (n,)), 1, n)
     end
@@ -639,7 +641,7 @@ function fixed_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis; �
     if !isconverged
         Base.warn_once("initial_deformation failed to converge with λ = ", ap.λ)
         if any(x->!isfinite(x), convert_from_fixed(u0))
-            u0 = cs2u(Vec{N,T}, cs)
+            u0 = cs2u(SVector{N,T}, cs)
         end
     end
     uclamp!(u0, maxshift)
@@ -659,7 +661,7 @@ end
 computes an optimal vector-of-deformations `ϕs` for an image sequence,
 using an temporal penalty coefficient `λt`.
 """
-function fixed_λ{T,N,_}(cs::AbstractArray{Vec{N,T}}, Qs::AbstractArray{Mat{N,N,T}}, knots::NTuple{N}, ap::AffinePenalty{_,N}, λt, mmis; ϕs_old = identity, mu_init=0.1, kwargs...)
+function fixed_λ{T,N,_,L}(cs::AbstractArray{SVector{N,T}}, Qs::AbstractArray{SMatrix{N,N,T,L}}, knots::NTuple{N}, ap::AffinePenalty{_,N}, λt, mmis; ϕs_old = identity, mu_init=0.1, kwargs...)
     λtT = T(λt)
     apT = convert(AffinePenalty{T,N}, ap)
     maxshift = map(x->(x-1)>>1, size(first(mmis)))
@@ -679,8 +681,8 @@ end
 
 # This version re-packs variables as read from the .jld file
 function fixed_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N}, ap::AffinePenalty{T,N}, λt, mmis::Array{Tf}; kwargs...)
-    csr = reinterpret(Vec{N,Tf}, cs, tail(size(cs)))
-    Qsr = reinterpret(Mat{N,N,Tf}, Qs, tail(tail(size(Qs))))
+    csr = reinterpret(SVector{N,Tf}, cs, tail(size(cs)))
+    Qsr = reinterpret(similar_type(SArray,Tf,Size(N,N)), Qs, tail(tail(size(Qs))))
     if length(mmis) > 10^7
         L = length(mmis)*sizeof(Tf)/1024^3
         @printf "The mismatch data are %0.2f GB in size.\n  During optimization, the initial function evaluations may be limited by I/O and\n  could be very slow. Later evaluations should be faster.\n" L
@@ -761,8 +763,8 @@ function auto_λ{Tf<:Number,T,N}(cs::Array{Tf}, Qs::Array{Tf}, knots::NTuple{N},
 end
 
 function auto_λ{T,N}(cs::Array{Float64}, Qs::Array{Float64}, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis::Array{Float64}, λrange; kwargs...)
-    csr = reinterpret(Vec{N,Float64}, cs, tail(size(cs)))
-    Qsr = reinterpret(Mat{N,N,Float64}, Qs, tail(tail(size(Qs))))
+    csr = reinterpret(SVector{N,Float64}, cs, tail(size(cs)))
+    Qsr = reinterpret(similar_type(SArray,Float64,Size(N,N)), Qs, tail(tail(size(Qs))))
     mmisr = reinterpret(NumDenom{Float64}, mmis, tail(size(mmis)))
     mmisc = cachedinterpolators(mmisr, N, ntuple(d->(size(mmisr,d)+1)>>1, N))
     ap64 = convert(AffinePenalty{Float64,N}, ap)
@@ -773,7 +775,7 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     λmin, λmax = λrange
     gridsize = map(length, knots)
     uc = zeros(T, N, gridsize...)
-    for i = 1:length(cs)
+    for i in CartesianRange(gridsize)
         uc[:,i] = convert(Vector{T}, cs[i])
     end
     function optimizer!(x, mu_init)
@@ -799,7 +801,7 @@ function auto_λ{T,N}(cs, Qs, knots::NTuple{N}, ap::AffinePenalty{T,N}, mmis, λ
     ϕap = GridDeformation(u0, knots)
     ϕap, penaltyap = optimizer!(ϕap, mu_init)
     n = ceil(Int, log2(λmax) - log2(λmin))
-    λ_all = Array(typeof(λmin), n)
+    λ_all = Vector{typeof(λmin)}(n)
     penalty_all = similar(λ_all, typeof(penaltyprev))
     datapenalty_all = similar(penalty_all)
     ϕ_all = Any[]
@@ -866,8 +868,8 @@ function auto_λt(Es, cs, Qs, ap, λtrange)
     Esum = sum(Es)
     λt = first(λtrange)
     n = ceil(Int, log2(last(λtrange)) - log2(λt))
-    datapenalty = Array(typeof(Esum), n)
-    λts = Array(typeof(λt), n)
+    datapenalty = Vector{typeof(Esum)}(n)
+    λts = Vector{typeof(λt)}(n)
     @showprogress 1 "Calculating quadratic penalty as a function of λt: " for λindex = 1:n
         λts[λindex] = λt
         u0, isconverged = initial_deformation(ap, λt, cs, Qs)
@@ -886,15 +888,15 @@ function auto_λt(Es, cs, Qs, ap, λtrange)
 end
 
 function auto_λt{Tf<:Number,T,N}(Es, cs::Array{Tf}, Qs::Array{Tf}, ap::AffinePenalty{T,N}, λt)
-    csr = reinterpret(Vec{N,Tf}, cs, tail(size(cs)))
-    Qsr = reinterpret(Mat{N,N,Tf}, Qs, tail(tail(size(Qs))))
+    csr = reinterpret(SVector{N,Tf}, cs, tail(size(cs)))
+    Qsr = reinterpret(similar_type(SArray,Tf,Size(N,N)), Qs, tail(tail(size(Qs))))
     auto_λt(Es, csr, Qsr, ap, λt)
 end
 
 ###
 ### Whole-experiment optimization with a temporal roughness penalty
 ###
-function initial_deformation{T,N,V<:Vec,M<:Mat}(ap::AffinePenalty{T,N}, λt, cs::AbstractArray{V}, Qs::AbstractArray{M})
+function initial_deformation{T,N,V<:SVector,M<:SMatrix}(ap::AffinePenalty{T,N}, λt, cs::AbstractArray{V}, Qs::AbstractArray{M})
     Tv = eltype(V)
     eltype(M) == Tv || error("element types of cs ($(eltype(V))) and Qs ($(eltype(M))) must match")
     length(V) == N || throw(DimensionMismatch("Dimensionality $N of ap does not match $(length(V))"))
@@ -903,7 +905,7 @@ function initial_deformation{T,N,V<:Vec,M<:Mat}(ap::AffinePenalty{T,N}, λt, cs:
     b = prep_b(Tv, cs, Qs)
     P = TimeHessian(AffineQHessian(apc, Qs, identity), convert(Tv, λt))
     x, isconverged = find_opt(P, b)
-    convert_to_fixed(Vec{N,Tv}, x, size(cs)), isconverged
+    convert_to_fixed(SVector{N,Tv}, x, size(cs)), isconverged
 end
 
 immutable TimeHessian{AQH<:AffineQHessian,T}
@@ -922,8 +924,8 @@ function (*){AQH}(P::TimeHessian{AQH}, x::AbstractVector)
     y
 end
 
-function vec2vecϕ{T,N}(Qs::Array{Mat{N,N,T}}, x::AbstractVector{T})
-    xf = convert_to_fixed(Vec{N,T}, x, size(Qs))
+function vec2vecϕ{T,N,L}(Qs::Array{SMatrix{N,N,T,L}}, x::AbstractVector{T})
+    xf = convert_to_fixed(SVector{N,T}, x, size(Qs))
     _vec2vecϕ(xf, Base.front(size(Qs)))
 end
 
@@ -992,7 +994,7 @@ function optimize(tform::AffineTransform, mmis, knots)
     # Assemble the objective and constraints
 
     constraints = Optim.ConstraintsL(X', lower', upper')
-    gtmp = Array(Vec{N,T}, gridsize)
+    gtmp = Array{SVector{N,T}}(gridsize)
     objective = (x,g) -> affinepenalty!(g, x, mmis, keep, X', gridsize, gtmp)
     @assert typeof(objective(A', T[])) == T
     result = interior(DifferentiableFunction(x->objective(x,T[]), Optim.dummy_g!, objective), A', constraints, method=:cg)
@@ -1019,7 +1021,7 @@ end
 function _calculate_u{N}(At, Xt, gridsize::NTuple{N})
     Ut = Xt*At
     u = Ut[:,1:size(Ut,2)-1]'                   # discard the dummy dimension
-    reinterpret(Vec{N, eltype(u)}, u, gridsize) # put u in the shape of the grid
+    reinterpret(SVector{N, eltype(u)}, u, gridsize) # put u in the shape of the grid
 end
 
 ###
@@ -1104,7 +1106,7 @@ end
 
 function sigpenalty(x, data)
     bottom, top, center, width = x[1], x[2], x[3], x[4]
-    sumabs2((data-bottom)/(top-bottom) - 1./(1+exp(-(collect(1:length(data))-center)/width)))
+    sum(abs2, (data-bottom)/(top-bottom) - 1./(1+exp.(-(collect(1:length(data))-center)/width)))
 end
 
 @generated function RegisterCore.maxshift{T,N}(A::CachedInterpolation{T,N})

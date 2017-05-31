@@ -4,8 +4,8 @@ using RegisterCore, CenterIndexedArrays
 
 export correctbias!, nanpad, mismatch0, aperture_grid, allocate_mmarrays, default_aperture_width, truncatenoise!
 
-typealias DimsLike Union{AbstractVector{Int}, Dims}
-typealias WidthLike Union{AbstractVector,Tuple}
+const DimsLike = Union{AbstractVector{Int}, Dims}
+const WidthLike = Union{AbstractVector,Tuple}
 
 mismatch{T<:AbstractFloat}(fixed::AbstractArray{T}, moving::AbstractArray{T}, maxshift::DimsLike; normalization = :intensity) = mismatch(T, fixed, moving, maxshift; normalization=normalization)
 mismatch(fixed::AbstractArray, moving::AbstractArray, maxshift::DimsLike; normalization = :intensity) = mismatch(Float32, fixed, moving, maxshift; normalization=normalization)
@@ -149,10 +149,9 @@ grid of aperture centers.  The grid has size `gridsize`, and is
 constructed for an image of spatial size `ssize`.  Along each
 dimension the first and last elements are at the image corners.
 """
-function aperture_grid(ssize, gridsize)
-    N = length(ssize)
+function aperture_grid{N}(ssize::Dims{N}, gridsize)
     length(gridsize) == N || error("ssize and gridsize must have the same length")
-    grid = Array(NTuple{N,Float64}, gridsize...)
+    grid = Array{NTuple{N,Float64},N}((gridsize...))
     centers = map(i-> gridsize[i] > 1 ? collect(linspace(1,ssize[i],gridsize[i])) : [(ssize[i]+1)/2], 1:N)
     for I in CartesianRange(size(grid))
         grid[I] = ntuple(i->centers[i][I[i]], N)
@@ -181,7 +180,7 @@ function allocate_mmarrays{T,C<:Union{AbstractVector,Tuple}}(::Type{T}, aperture
     N = length(first(aperture_centers))
     sz = map(x->2*x+1, maxshift)
     mm = MismatchArray(T, sz...)
-    mms = Array(typeof(mm), size(aperture_centers))
+    mms = Array{typeof(mm)}(size(aperture_centers))
     f = true
     for i in eachindex(mms)
         if f
@@ -196,7 +195,7 @@ end
 
 function allocate_mmarrays{T,R<:Real}(::Type{T}, aperture_centers::AbstractArray{R}, maxshift)
     N = ndims(aperture_centers)-1
-    mms = Array(MismatchArray{T,N}, size(aperture_centers)[2:end])
+    mms = Array{MismatchArray{T,N}}(size(aperture_centers)[2:end])
     sz = map(x->2*x+1, maxshift)
     for i in eachindex(mms)
         mms[i] = MismatchArray(T, sz...)
@@ -205,7 +204,7 @@ function allocate_mmarrays{T,R<:Real}(::Type{T}, aperture_centers::AbstractArray
 end
 
 function allocate_mmarrays{T<:Real,N}(::Type{T}, gridsize::NTuple{N,Int}, maxshift)
-    mms = Array(MismatchArray{NumDenom{T},N}, gridsize)
+    mms = Array{MismatchArray{NumDenom{T},N}}(gridsize)
     sz = map(x->2*x+1, maxshift)
     for i in eachindex(mms)
         mms[i] = MismatchArray(T, sz...)
@@ -225,7 +224,7 @@ immutable FirstDimIterator{A<:AbstractArray,R<:CartesianRange}
     data::A
     rng::R
 
-    FirstDimIterator(data) = new(data, CartesianRange(Base.tail(size(data))))
+    (::Type{FirstDimIterator{A,R}}){A,R}(data::A) = new{A,R}(data, CartesianRange(Base.tail(size(data))))
 end
 FirstDimIterator(A::AbstractArray) = FirstDimIterator{typeof(A),typeof(CartesianRange(Base.tail(size(A))))}(A)
 
@@ -273,7 +272,7 @@ function default_aperture_width(img, gridsize::DimsLike, overlap::DimsLike = zer
             error("gridsize $gridsize is too large, given the size $(size(img)[sc]) of the image")
         end
     end
-    gsz1 = max(1,[gridsize...].-1)
+    gsz1 = max.(1, [gridsize...].-1)
     gflag = [gridsize...].>1
     tuple((([size(img, sc...)...]-gflag)./gsz1+2*[overlap...].*gflag)...)
 end
@@ -342,7 +341,7 @@ function padsize!(sz::Vector, blocksize, maxshift)
     sz
 end
 function padsize(blocksize, maxshift)
-    sz = Array(Int, length(blocksize))
+    sz = Vector{Int}(length(blocksize))
     padsize!(sz, blocksize, maxshift)
 end
 
@@ -388,9 +387,9 @@ function safe_get!(dest::AbstractArray, src::SubArray, isrc, default)
     assertsamesize(dest, src2)
     # Determine the in-bounds region. If src slices some dimensions,
     # we need to skip over them.
-    newindexes = Array(Any, 0)
+    newindexes = Vector{Any}(0)
     sizehint!(newindexes, ndims(src2))
-    psize = Array(Int, 0)
+    psize = Vector{Int}(0)
     sizehint!(psize, ndims(src2))
     for i = 1:length(src2.indexes)
         j = src2.indexes[i]
@@ -429,9 +428,16 @@ tovec(v::Tuple) = [v...]
 # TODO: redesign this whole thing to be safer?
 using Base: ViewIndex, to_indexes, unsafe_length, index_shape, tail
 
-@inline function extraunsafe_view{T,N}(V::SubArray{T,N}, I::Vararg{ViewIndex,N})
-    idxs = unsafe_reindex(V, V.indexes, to_indexes(I...))
-    SubArray(V.parent, idxs, map(unsafe_length, (index_shape(V.parent, idxs...))))
+if VERSION < v"0.6.0-dev"
+    @inline function extraunsafe_view{T,N}(V::SubArray{T,N}, I::Vararg{ViewIndex,N})
+        idxs = unsafe_reindex(V, V.indexes, to_indexes(I...))
+        SubArray(V.parent, idxs, map(unsafe_length, (index_shape(V.parent, idxs...))))
+    end
+else
+    @inline function extraunsafe_view{T,N}(V::SubArray{T,N}, I::Vararg{ViewIndex,N})
+        idxs = unsafe_reindex(V, V.indexes, to_indices(V, I))
+        SubArray(V.parent, idxs)
+    end
 end
 
 unsafe_reindex(V, idxs::Tuple{UnitRange, Vararg{Any}}, subidxs::Tuple{UnitRange, Vararg{Any}}) =

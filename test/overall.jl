@@ -1,7 +1,7 @@
 nt = 3  # number of time points
 wpids = addprocs(min(nt, 3))
 
-using BlockRegistration, BlockRegistrationScheduler, Images, JLD, FixedSizeArrays
+using BlockRegistration, BlockRegistrationScheduler, Images, JLD, StaticArrays
 # using CUDArt
 using Base.Test
 

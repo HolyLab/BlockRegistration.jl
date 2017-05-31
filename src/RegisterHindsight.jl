@@ -2,7 +2,7 @@ __precompile__()
 
 module RegisterHindsight
 
-using Interpolations, RegisterDeformation, RegisterPenalty, ImageCore, FixedSizeArrays, OffsetArrays
+using Interpolations, RegisterDeformation, RegisterPenalty, ImageCore, StaticArrays, OffsetArrays
 using Compat
 using Base.Cartesian
 using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
@@ -133,7 +133,7 @@ function penalty_hindsight_data!_gen{IT}(N, ::Type{IT}, Pad)
                     # chain rule, and thus need the spatial gradient
                     # of the image
                     gradient!(gimg, moving.itp, $(ϕxindexes...))
-                    coef = (-2*diff)*Vec{$N,GT}(gimg)
+                    coef = (-2*diff)*SVector{$N,GT}(gimg)
                     $(Expr(:block, g_exprs...))
                 end
             end

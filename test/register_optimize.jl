@@ -1,11 +1,11 @@
-using FixedSizeArrays, AffineTransforms, Interpolations, Base.Test
+using StaticArrays, AffineTransforms, Interpolations, Base.Test
 import BlockRegistration, RegisterOptimize
 using RegisterCore, RegisterPenalty, RegisterDeformation, RegisterMismatch, RegisterFit
 
 using RegisterTestUtilities
 
 ### Rigid registration
-fixed = sin(linspace(0,pi,101)).*linspace(5,7,97)'
+fixed = sin.(linspace(0,pi,101)).*linspace(5,7,97)'
 tform = tformrotate(pi/12)
 moving = transform(fixed, tform)
 tform0 = tformeye(2)
@@ -14,7 +14,7 @@ tfprod = tform*tfrm
 S = tfprod.scalefwd
 @test abs(S[1,2]) < 0.05
 offset = tfprod.offset
-@test all(abs(offset) .< 0.03)
+@test all(abs.(offset) .< 0.03)
 
 ###
 ### Global-optimum initial guess
@@ -32,7 +32,7 @@ end
 function initial_guess_direct(A, cs::Matrix, Qs::Matrix)
     Ac, b = build_Ac_b(A, cs, Qs)
     x = Ac\b
-    reinterpret(Vec{2,Float64}, x, size(Qs))
+    reinterpret(SVector{2,Float64}, x, size(Qs))
 end
 
 function build_Ac_b{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
@@ -68,7 +68,7 @@ end
 function initial_guess_direct{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
     Ac, b = build_Ac_b(A, λt, cs, Qs)
     x = Ac\b
-    reinterpret(Vec{2,Float64}, x, size(Qs))
+    reinterpret(SVector{2,Float64}, x, size(Qs))
 end
 
 function build_A(knots, λ)
@@ -85,8 +85,8 @@ end
 knots = (linspace(1,20,4),linspace(1,15,4))
 A, ap = build_A(knots, 1.0)
 gridsize = map(length, knots)
-Qs = Array(Any, gridsize)
-cs = Array(Any, gridsize)
+Qs = Array{Any}(gridsize)
+cs = Array{Any}(gridsize)
 
 # Known exact answer
 tfm = tformrotate(pi/12)
@@ -98,18 +98,18 @@ end
 P = RegisterOptimize.AffineQHessian(ap, Qs, identity)
 Ac, b = build_Ac_b(A, cs, Qs);
 v = zeros(size(P,1)); v[1] = 1
-@test_approx_eq_eps P*v vec(Ac[1,:]) 0.0001
+@test ≈(P*v, vec(Ac[1,:]), atol=0.0001)
 v = zeros(size(P,1)); v[4] = 1
-@test_approx_eq_eps P*v vec(Ac[4,:]) 0.0001
+@test ≈(P*v, vec(Ac[4,:]), atol=0.0001)
 ux = initial_guess_direct(A, cs, Qs)
 u, isconverged = @inferred(RegisterOptimize.initial_deformation(ap, cs, Qs))
 @test isconverged
 @test size(u) == size(ux)
-@test eltype(u) == Vec{2,Float64}
+@test eltype(u) == SVector{2,Float64}
 # The accuracy here is low only because of the diagonal regularization
 for I in eachindex(u)
-    @test_approx_eq_eps u[I] cs[I] 1e-3
-    @test_approx_eq_eps ux[I] cs[I] 1e-3
+    @test ≈(u[I], cs[I], atol=1e-3)
+    @test ≈(ux[I], cs[I], atol=1e-3)
 end
 # Ensure that λ=0 gives the right initialization
 knots0 = (linspace(1,3,3),)
@@ -131,21 +131,21 @@ end
 P = RegisterOptimize.AffineQHessian(ap, Qs, identity)
 Ac, b = build_Ac_b(A, cs, Qs);
 v = zeros(size(P,1)); v[1] = 1
-@test_approx_eq_eps P*v vec(Ac[1,:]) 0.0001
+@test ≈(P*v, vec(Ac[1,:]), atol=0.0001)
 v = zeros(size(P,1)); v[4] = 1
-@test_approx_eq_eps P*v vec(Ac[4,:]) 0.0001
+@test ≈(P*v, vec(Ac[4,:]), atol=0.0001)
 ux = initial_guess_direct(A, cs, Qs)
 u, isconverged = RegisterOptimize.initial_deformation(ap, cs, Qs)
 @test isconverged
 @test size(u) == size(ux)
-@test eltype(u) == Vec{2,Float64}
+@test eltype(u) == SVector{2,Float64}
 for I in eachindex(u)
-    @test_approx_eq_eps u[I] ux[I] 1e-3
+    @test ≈(u[I], ux[I], atol=1e-3)
 end
 
 # Random initialization with a temporal penalty
-Qs = Array(Mat{2,2,Float64}, gridsize..., 5)
-cs = Array(Vec{2,Float64}, gridsize..., 5)
+Qs = Array{SMatrix{2,2,Float64,4}}(gridsize..., 5)
+cs = Array{SVector{2,Float64}}(gridsize..., 5)
 for I in CartesianRange(size(Qs))
     QF = rand(2,2)
     Qs[I] = QF'*QF
@@ -157,18 +157,18 @@ Qsr = convert(Array{Matrix{Float64}, 3}, Qs)
 P = RegisterOptimize.TimeHessian(RegisterOptimize.AffineQHessian(ap, Qs, identity), λt)
 Ac, b = build_Ac_b(A, λt, csr, Qsr)
 v = zeros(size(P,1)); v[1] = 1
-@test_approx_eq_eps P*v vec(Ac[1,:]) 0.0001
+@test ≈(P*v, vec(Ac[1,:]), atol=0.0001)
 v = zeros(size(P,1)); v[4] = 1
-@test_approx_eq_eps P*v vec(Ac[4,:]) 0.0001
+@test ≈(P*v, vec(Ac[4,:]), atol=0.0001)
 v = zeros(size(P,1)); v[end] = 1
-@test_approx_eq_eps P*v vec(Ac[end,:]) 0.0001
+@test ≈(P*v, vec(Ac[end,:]), atol=0.0001)
 ux = initial_guess_direct(A, 1.0, csr, Qsr)
 u, isconverged = RegisterOptimize.initial_deformation(ap, 1.0, cs, Qs)
 @test isconverged
 @test size(u) == size(ux)
-@test eltype(u) == Vec{2,Float64}
+@test eltype(u) == SVector{2,Float64}
 for I in eachindex(u)
-    @test_approx_eq_eps u[I] ux[I] 1e-3
+    @test ≈(u[I], ux[I], atol=1e-3)
 end
 
 
@@ -178,8 +178,8 @@ end
 # gridsize = (7,6)
 # knots = (linspace(1,arraysize[1],gridsize[1]),linspace(1,arraysize[2],gridsize[2]))
 # A, ap = build_A(knots, 1.0)
-# Qs = Array(Any, gridsize)
-# cs = Array(Any, gridsize)
+# Qs = Array{Any}(gridsize)
+# cs = Array{Any}(gridsize)
 # for I in CartesianRange(gridsize)
 #     QF = rand(2,2)
 #     Qs[I] = QF'*QF
@@ -192,7 +192,7 @@ end
 # u = RegisterOptimize.initial_deformation(ap, cs, Qs, ϕ_old, (10,10))
 # ϕ_c = ϕ_old(GridDeformation(u, knots))
 # for I in eachindex(ux)
-#     @test_approx_eq ϕ_c.u[I] ux[I]
+#     @test ϕ_c.u[I] ≈ ux[I]
 # end
 
 
@@ -226,10 +226,10 @@ end
 # fdgrad = ForwardDiff.gradient(x->SolverInterface.eval_f(objective, x))
 # error("stop")
 # @test size(u) == size(ux)
-# @test eltype(u) == Vec{2,Float64}
+# @test eltype(u) == SVector{2,Float64}
 # ϕ_c = ϕ_old(GridDeformation(u, knots))
 # for I in eachindex(ux)
-#     @test_approx_eq ϕ_c.u[I] ux[I]
+#     @test ϕ_c.u[I] ≈ ux[I]
 # end
 
 
@@ -245,17 +245,17 @@ gridsize = (7,5)
 cntr = ([imgsz...]+1)/2
 tform = AffineTransform(S, zeros(2))
 knots = (linspace(1,imgsz[1],gridsize[1]), linspace(1,imgsz[2],gridsize[2]))
-shifts = Array(Any, gridsize)
+shifts = Array{Any}(gridsize)
 mxsv = zeros(2)
 for (i,knot) in enumerate(eachknot(knots))
     knotv = [knot...]-cntr
     dx = tform*knotv - knotv
-    mxsv = max(mxsv, abs(dx))
+    mxsv = max.(mxsv, abs.(dx))
     shifts[i] = dx
 end
 # Create the fake mismatch data
 m, n = 2ceil(Int,mxsv[1])+3, 2ceil(Int,mxsv[2])+3
-nums = Array(Matrix{Float64}, gridsize)
+nums = Array{Matrix{Float64}}(gridsize)
 for I in eachindex(nums)
     QF = rand(2,2)   # random quadratic component
     nums[I] = quadratic(m, n, shifts[I], QF*QF')
@@ -272,7 +272,7 @@ dp = AffinePenalty(knots, λ)
 ϕ, fval = RegisterOptimize.optimize!(ϕ, identity, dp, mmis) #; print_level=5)
 @test 0 <= fval <= 1e-5
 for I in eachindex(shifts)
-    @test_approx_eq_eps shifts[I] ϕ.u[I] 0.01
+    @test ≈(shifts[I], ϕ.u[I], atol=0.01)
 end
 
 ### Optimization with a temporal penalty
@@ -295,7 +295,7 @@ for (u, val) in ((ϕs[1].u, target[:,1]),
                  (ϕs[2].u, target[:,2]),
                  (ϕs[3].u, target[:,3]))
     for uv in u
-        @test_approx_eq_eps uv val 1e-2  # look into why this is so low
+        @test ≈(uv, val, atol=1e-2)  # look into why this is so low
     end
 end
 
@@ -309,8 +309,8 @@ mxshift = (2,)
 gridsize = map(length, knots)
 mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift; normalization=:pixels)
 E0 = zeros(size(mms))
-cs = Array(Any, size(mms))
-Qs = Array(Any, size(mms))
+cs = Array{Any}(size(mms))
+Qs = Array{Any}(size(mms))
 thresh = length(fixed)/prod(gridsize)/4
 for i = 1:length(mms)
     E0[i], cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)

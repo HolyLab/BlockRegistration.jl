@@ -6,6 +6,8 @@ using CenterIndexedArrays
 using Base.Cartesian: @nloops, @nref, @ntuple
 using Images, ColorTypes
 
+using Compat
+
 import Base: +, -, *, /
 import Base: eltype, getindex, ndims, pointer, setindex!, show, size
 import Base: unsafe_getindex
@@ -221,7 +223,7 @@ function Base.showcompact(io::IO, p::NumDenom)
     print(io, ")")
 end
 
-typealias MismatchArray{ND<:NumDenom,N,A} CenterIndexedArray{ND,N,A}
+@compat const MismatchArray{ND<:NumDenom,N,A} = CenterIndexedArray{ND,N,A}
 
 maxshift(A::MismatchArray) = A.halfsize
 
@@ -275,7 +277,7 @@ function mismatcharrays{A<:AbstractArray,T<:Number}(nums::AbstractArray{A}, deno
         num = nums[i]
         mm = MismatchArray(num, denom)
         if first
-            mms = Array(typeof(mm), size(nums))
+            mms = Array{typeof(mm)}(size(nums))
             first = false
         end
         mms[i] = mm
@@ -290,7 +292,7 @@ function mismatcharrays{A1<:AbstractArray,A2<:AbstractArray}(nums::AbstractArray
     for i in eachindex(nums, denoms)
         mm = MismatchArray(nums[i], denoms[i])
         if first
-            mms = Array(typeof(mm), size(nums))
+            mms = Array{typeof(mm)}(size(nums))
             first = false
         end
         mms[i] = mm
@@ -303,7 +305,7 @@ end
 numerator and denominator arrays.
 """
 function separate{T}(data::AbstractArray{NumDenom{T}})
-    num = Array(T, size(data))
+    num = Array{T}(size(data))
     denom = similar(num)
     for I in eachindex(data)
         nd = data[I]
@@ -320,7 +322,7 @@ end
 
 function separate{M<:MismatchArray}(mma::AbstractArray{M})
     T = eltype(eltype(M))
-    nums = Array(CenterIndexedArray{T,ndims(M)}, size(mma))
+    nums = Array{CenterIndexedArray{T,ndims(M)}}(size(mma))
     denoms = similar(nums)
     for (i,mm) in enumerate(mma)
         nums[i], denoms[i] = separate(mm)
@@ -417,7 +419,7 @@ function highpass{T}(::Type{T}, data::AbstractArray, sigma)
     if any(isinf, sigma)
         datahp = convert(Array{T,ndims(data)}, data)
     else
-        datahp = data - imfilter(T, data, KernelFactors.IIRGaussian(T, (sigma...,)))
+        datahp = data - imfilter(T, data, KernelFactors.IIRGaussian(T, (sigma...,)), NA())
     end
     datahp[datahp .< 0] = 0  # truncate anything below 0
     datahp
@@ -434,8 +436,13 @@ parent.
 See also `trimmedview`.
 """
 paddedview(A::SubArray) = _paddedview(A, (), (), A.indexes...)
-_paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
-    SubArray(A.parent, newindexes, newsize)
+if VERSION < v"0.6.0-dev"
+    _paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
+        SubArray(A.parent, newindexes, newsize)
+else
+    _paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
+        SubArray(A.parent, newindexes)
+end
 @inline function _paddedview(A, newindexes, newsize, index, indexes...)
     d = length(newindexes)+1
     _paddedview(A, (newindexes..., pdindex(A.parent, d, index)), pdsize(A.parent, newsize, d, index), indexes...)

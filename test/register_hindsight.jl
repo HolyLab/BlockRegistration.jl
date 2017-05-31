@@ -1,7 +1,7 @@
 using Interpolations, BlockRegistration, RegisterMismatch
 using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
 import RegisterHindsight
-using DualNumbers, FixedSizeArrays
+using DualNumbers, StaticArrays
 using TestImages
 using Base.Test
 
@@ -26,7 +26,7 @@ function dualgrad_data!(g, ϕ, fixed, moving)
     ur = RegisterDeformation.convert_from_fixed(ϕ.u.itp.coefs)
     gr = RegisterDeformation.convert_from_fixed(g)
     nd = size(ur, 1)
-    for i in eachindex(ϕ.u.itp.coefs)
+    for i in CartesianRange(indices(ϕ.u.itp.coefs))
         for j = 1:nd
             temp = ur[j, i]
             ur[j, i] = dual(value(temp), 1.0)
@@ -40,7 +40,7 @@ function dualgrad_reg!(g, ap, ϕ)
     ur = RegisterDeformation.convert_from_fixed(ϕ.u.itp.coefs)
     gr = RegisterDeformation.convert_from_fixed(g)
     nd = size(ur, 1)
-    for i in eachindex(ϕ.u.itp.coefs)
+    for i in CartesianRange(indices(ϕ.u.itp.coefs))
         for j = 1:nd
             temp = ur[j, i]
             ur[j, i] = dual(value(temp), 1.0)

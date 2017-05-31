@@ -2,11 +2,14 @@ __precompile__()
 
 module RegisterDeformation
 
-using Images, AffineTransforms, Interpolations, ColorTypes, FixedSizeArrays, HDF5, JLD, ProgressMeter
+using Images, Interpolations, ColorTypes, StaticArrays, HDF5, JLD, ProgressMeter
 using RegisterUtilities
 using Base: Cartesian, tail
 import Interpolations: AbstractInterpolation, AbstractExtrapolation
 import ImageTransformations: warp, warp!
+# to avoid `scale` conflict:
+using AffineTransforms: AffineTransform, TransformedArray
+using Compat
 
 export
     # types
@@ -30,9 +33,9 @@ export
     warp!,
     warpgrid
 
-typealias DimsLike Union{Vector{Int}, Dims}
-typealias InterpExtrap Union{AbstractInterpolation,AbstractExtrapolation}
-typealias Extrapolatable{T,N} Union{TransformedArray{T,N},AbstractExtrapolation{T,N}}
+const DimsLike = Union{Vector{Int}, Dims}
+const InterpExtrap = Union{AbstractInterpolation,AbstractExtrapolation}
+@compat const Extrapolatable{T,N} = Union{TransformedArray{T,N},AbstractExtrapolation{T,N}}
 
 """
 # RegisterDeformation
@@ -62,7 +65,7 @@ The major functions/types exported by RegisterDeformation are:
 """
 RegisterDeformation
 
-abstract AbstractDeformation{T,N}
+@compat abstract type AbstractDeformation{T,N} end
 Base.eltype{T,N}(::Type{AbstractDeformation{T,N}}) = T
 Base.ndims{T,N}(::Type{AbstractDeformation{T,N}}) = N
 Base.eltype{D<:AbstractDeformation}(::Type{D}) = eltype(supertype(D))
@@ -71,14 +74,14 @@ Base.eltype(d::AbstractDeformation) = eltype(typeof(d))
 Base.ndims(d::AbstractDeformation) = ndims(typeof(d))
 
 """
-`ϕ = GridDeformation(u::Array{FixedVector}, dims)` creates a
+`ϕ = GridDeformation(u::Array{<:SVector}, dims)` creates a
 deformation `ϕ` for an array of size `dims`.  `u` specifies the
 "pixel-wise" displacement at a series of control points that are
 evenly-spaced over the domain specified by `dims` (i.e., using
 knot-vectors `linspace(1,dims[d],size(u,d))`).  In particular, each
 corner of the array is the site of one control point.
 
-`ϕ = GridDeformation(u::Array{FixedVector}, knots)` specifies the
+`ϕ = GridDeformation(u::Array{<:SVector}, knots)` specifies the
 knot-vectors manually. `u` must have dimensions equal to
 `(length(knots[1]), length(knots[2]), ...)`.
 
@@ -95,54 +98,54 @@ immutable GridDeformation{T,N,A<:AbstractArray,L} <: AbstractDeformation{T,N}
     u::A
     knots::NTuple{N,L}
 
-    function GridDeformation{FV<:FixedVector}(u::AbstractArray{FV,N},
-                                              knots::NTuple{N,L})
+    function (::Type{GridDeformation{T,N,A,L}}){T,N,A,L,FV<:SVector}(u::AbstractArray{FV,N}, knots::NTuple{N,L})
+        typeof(u) == A || error("typeof(u) = $(typeof(u)), which is different from $A")
         length(FV) == N || throw(DimensionMismatch("Dimensionality $(length(FV)) must match $N knot vectors"))
         for d = 1:N
             size(u, d) == length(knots[d]) || error("size(u) = $(size(u)), but the knots specify a grid of size $(map(length, knots))")
         end
-        new(u, knots)
+        new{T,N,A,L}(u, knots)
     end
-    function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV,N})
-        new(u, u.ranges)
+    function (::Type{GridDeformation{T,N,A,L}}){T,N,A,L,FV<:SVector}(u::ScaledInterpolation{FV,N})
+        new{T,N,A,L}(u, u.ranges)
     end
 end
 
-typealias InterpolatingDeformation{T,N,A<:AbstractInterpolation} GridDeformation{T,N,A}
+@compat const InterpolatingDeformation{T,N,A<:AbstractInterpolation} = GridDeformation{T,N,A}
 
 # Ambiguity avoidance
-function GridDeformation{FV<:FixedVector,N}(u::AbstractArray{FV,N},
-                                            knots::Tuple{})
+function GridDeformation{FV<:SVector,N}(u::AbstractArray{FV,N},
+                                        knots::Tuple{})
     error("Cannot supply an empty knot tuple")
 end
 
 # With knot ranges
-function GridDeformation{FV<:FixedVector,N,L<:AbstractVector}(u::AbstractArray{FV,N},
+function GridDeformation{FV<:SVector,N,L<:AbstractVector}(u::AbstractArray{FV,N},
                                                               knots::NTuple{N,L})
     T = eltype(FV)
-    length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires Vec{$N,T}"))
+    length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires SVector{$N,T}"))
     GridDeformation{T,N,typeof(u),L}(u, knots)
 end
 
 # With image spatial size
-function GridDeformation{FV<:FixedVector,N,L<:Integer}(u::AbstractArray{FV,N},
+function GridDeformation{FV<:SVector,N,L<:Integer}(u::AbstractArray{FV,N},
                                                        dims::NTuple{N,L})
     T = eltype(FV)
-    length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires Vec{$N,T}"))
+    length(FV) == N || throw(DimensionMismatch("$N-dimensional array requires SVector{$N,T}"))
     knots = ntuple(d->linspace(1,dims[d],size(u,d)), N)
-    GridDeformation{T,N,typeof(u),LinSpace{Float64}}(u, knots)
+    GridDeformation{T,N,typeof(u),typeof(knots[1])}(u, knots)
 end
 
 # Construct from a plain array
-function GridDeformation{T<:Number,N}(u::Array{T}, knots::NTuple{N})
+function GridDeformation{T<:Number,N}(u::AbstractArray{T}, knots::NTuple{N})
     ndims(u) == N+1 || error("Need $(N+1) dimensions for $N-dimensional deformations")
     size(u,1) == N || error("First dimension of u must be of length $N")
-    uf = convert_to_fixed(Vec{N,T}, u, tail(size(u)))
+    uf = convert_to_fixed(SVector{N,T}, u, tail(size(u)))
     GridDeformation(uf, knots)
 end
 
 # Construct from a (u1, u2, ...) tuple
-function GridDeformation{N}(u::NTuple{N}, knots::NTuple{N})
+function GridDeformation{N}(u::NTuple{N,AbstractArray}, knots::NTuple{N})
     ndims(u[1]) == N || error("Need $N dimensions for $N-dimensional deformations")
     ua = permutedims(cat(N+1, u...), (N+1,(1:N)...))
     uf = convert_to_fixed(ua)
@@ -153,7 +156,7 @@ end
 GridDeformation{V<:AbstractVector}(u, knots::AbstractVector{V}) = GridDeformation(u, (knots...,))
 GridDeformation{R<:Real}(u, knots::AbstractVector{R}) = GridDeformation(u, (knots,))
 
-function GridDeformation{FV<:FixedVector}(u::ScaledInterpolation{FV})
+function GridDeformation{FV<:SVector}(u::ScaledInterpolation{FV})
     N = length(FV)
     ndims(u) == N || throw(DimensionMismatch("Dimension $(ndims(u)) incompatible with vectors of length $N"))
     GridDeformation{eltype(FV),N,typeof(u),typeof(u.ranges[1])}(u)
@@ -167,11 +170,11 @@ correspond to time; `ϕs[i]` is produced from `u[..., i]`.
 function griddeformations{N,T<:Number}(u::AbstractArray{T}, knots::NTuple{N})
     ndims(u) == N+2 || error("Need $(N+2) dimensions for a vector of $N-dimensional deformations")
     size(u,1) == N || error("First dimension of u must be of length $N")
-    uf = RegisterDeformation.convert_to_fixed(Vec{N,T}, u, Base.tail(size(u)))
+    uf = RegisterDeformation.convert_to_fixed(SVector{N,T}, u, Base.tail(size(u)))
     griddeformations(uf, knots)
 end
 
-function griddeformations{N,FV<:FixedVector}(u::AbstractArray{FV}, knots::NTuple{N})
+function griddeformations{N,FV<:SVector}(u::AbstractArray{FV}, knots::NTuple{N})
     ndims(u) == N+1 || error("Need $(N+1) dimensions for a vector of $N-dimensional deformations")
     length(FV) == N || throw(DimensionMismatch("Dimensionality $(length(FV)) must match $N knot vectors"))
     colons = ntuple(d->Colon(), N)::NTuple{N,Colon}
@@ -204,7 +207,7 @@ Interpolations.interpolate{ T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,
 
 Interpolations.interpolate!{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}) = error("ϕ is already interpolating")
 
-function vecindex{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}, x::FixedVector{N})
+function vecindex{T,N,A<:AbstractInterpolation}(ϕ::GridDeformation{T,N,A}, x::SVector{N})
     x + vecindex(ϕ.u, x)
 end
 
@@ -216,7 +219,7 @@ end
     quote
         $meta
         ux = ϕ.u[$(xindexes...)]
-        Vec($(ϕxindexes...))
+        SVector($(ϕxindexes...))
     end
 end
 
@@ -256,13 +259,13 @@ lookup(u, x, i) = u[i]
     args = [:(knots[$d][s[$d]]) for d = 1:N]
     quote
         s = ind2sub(map(length, knots), i)
-        Vec($(args...))
+        SVector($(args...))
     end
 end
 
 @generated function knot{N}(knots::NTuple{N}, I)
     args = [:(knots[$d][I[$d]]) for d = 1:N]
-    :(Vec($(args...)))
+    :(SVector($(args...)))
 end
 
 arraysize(knots::NTuple) = map(k->(x = extrema(k); convert(Int, x[2]-x[1]+1)), knots)
@@ -296,9 +299,9 @@ for a 3-dimensional deformation `ϕ`.
 """
 function regrid{T,N}(ϕ::InterpolatingDeformation{T,N}, sz::Dims{N})
     knots_new = map((r,n)->linspace(first(r), last(r), n), ϕ.knots, sz)
-    u = Array{Vec{N,T},N}(sz)
+    u = Array{SVector{N,T},N}(sz)
     for (i, k) in enumerate(eachknot(knots_new))
-        u[i] = ϕ.u[k.values...]
+        u[i] = ϕ.u[k...]
     end
     GridDeformation(u, knots_new)
 end
@@ -324,7 +327,7 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(ϕ_old::GridDeformation{T1,N,
     x = knot(knots, 1)
     out = _compose(u, unew, x, 1)
     ucomp = similar(u, typeof(out))
-    TG = Mat{N,N,eltype(out)}
+    TG = similar_type(SArray, eltype(out), Size(N, N))
     g = Array{TG}(size(u))
     gtmp = Vector{typeof(out)}(N)
     eyeN = eye(TG)
@@ -334,7 +337,7 @@ function compose{T1,T2,N,A<:AbstractInterpolation}(ϕ_old::GridDeformation{T1,N,
         y = x + dx
         ucomp[I] = dx + vecindex(u, y)
         vecgradient!(gtmp, u, y)
-        g[I] = convert(TG, gtmp) + eyeN
+        g[I] = hcat(ntuple(d->gtmp[d], Val{N})...) + eyeN
     end
     GridDeformation(ucomp, knots), g
 end
@@ -360,7 +363,7 @@ end
 
 function compose{T,N}(f::Function, ϕ_new::GridDeformation{T,N})
     f == identity || error("Only the identity function is supported")
-    ϕ_new, fill(eye(Mat{N,N,T}), size(ϕ_new.u))
+    ϕ_new, fill(eye(similar_type(SArray, T, Size(N, N))), size(ϕ_new.u))
 end
 
 function medfilt{D<:AbstractDeformation}(ϕs::AbstractVector{D}, n)
@@ -620,8 +623,8 @@ function _warp!{T}(::Type{T}, dest, img, ϕs, nworkers)
     for p in wpids
         remotecall_fetch(Main.eval, p, :(push!(LOAD_PATH, $mydir)))
         remotecall_fetch(Main.eval, p, :(using RegisterDeformation))
-        push!(simg, SharedArray(eltype(img), ssz, pids=[myid(),p]))
-        push!(swarped, SharedArray(T, ssz, pids=[myid(),p]))
+        push!(simg, SharedArray{eltype(img)}(ssz, pids=[myid(),p]))
+        push!(swarped, SharedArray{T}(ssz, pids=[myid(),p]))
     end
     nextidx = 0
     getnextidx() = nextidx += 1
@@ -660,7 +663,7 @@ function warp_write(dest, destarray, i)
     dest[colons..., i] = destarray
 end
 
-function extract1{V<:Vec}(u::AbstractArray{V}, N, ssz)
+function extract1{V<:SVector}(u::AbstractArray{V}, N, ssz)
     if ndims(u) == N+1
         ϕ = GridDeformation(reshape(u, size(u)[1:end-1]), ssz)
     else
@@ -670,13 +673,13 @@ function extract1{V<:Vec}(u::AbstractArray{V}, N, ssz)
 end
 extract1{D<:AbstractDeformation}(ϕs::Vector{D}, N, ssz) = ϕs[1]
 
-function extracti{V<:Vec}(u::AbstractArray{V}, i, ssz)
+function extracti{V<:SVector}(u::AbstractArray{V}, i, ssz)
     colons = [Colon() for d = 1:ndims(u)-1]
     GridDeformation(u[colons..., i], ssz)
 end
 extracti{D<:AbstractDeformation}(ϕs::Vector{D}, i, _) = ϕs[i]
 
-function checkϕdims{V<:Vec}(u::AbstractArray{V}, N, n)
+function checkϕdims{V<:SVector}(u::AbstractArray{V}, N, n)
     ndims(u) == N+1 || error("u's dimensionality $(ndims(u)) is inconsistent with the number of spatial dimensions $N of the image")
     if size(u)[end] != n
         error("Must have one `u` slice per image")
@@ -712,7 +715,7 @@ function knotgrid{T,N}(::Type{T}, knots::NTuple{N,Range})
     fill!(img, zero(T))
     for idim = 1:N
         indexes = Any[inds...]
-        indexes[idim] = clamp(round(Int, knots[idim]), first(inds[idim])+1, last(inds[idim])-1)
+        indexes[idim] = map(x->clamp(round(Int, x), first(inds[idim])+1, last(inds[idim])-1), knots[idim])
         img[indexes...] = one(T)
     end
     img
@@ -790,28 +793,28 @@ to_etp(etp::AbstractExtrapolation) = etp
 to_etp(img, A::AffineTransform) = TransformedArray(to_etp(img), A)
 
 # JLD extensions
-# Serializer for Array{FixedSizeArray{T,...}}
-immutable ArrayFSASerializer{T,DF,DT}
+# Serializer for Array{SArray{T,...}}
+immutable ArraySArraySerializer{T,DF,DT}
     A::Array{T,DT}
 end
 
-function JLD.readas{T,DT}(serdata::ArrayFSASerializer{T,1,DT})
+function JLD.readas{T,DT}(serdata::ArraySArraySerializer{T,1,DT})
     sz = size(serdata.A)
-    reinterpret(Vec{sz[1],T}, serdata.A, tail(sz))
+    reinterpret(SVector{sz[1],T}, serdata.A, tail(sz))
 end
-function JLD.readas{T,DT}(serdata::ArrayFSASerializer{T,2,DT})
+function JLD.readas{T,DT}(serdata::ArraySArraySerializer{T,2,DT})
     sz = size(serdata.A)
-    reinterpret(Mat{sz[1],sz[2],T}, serdata.A, tail(tail(sz)))
+    reinterpret(similar_type(SArray,T,Size(sz[1],sz[2])), serdata.A, tail(tail(sz)))
 end
 
-function JLD.writeas{FSA<:FixedArray}(A::Array{FSA})
+function JLD.writeas{FSA<:StaticArray}(A::Array{FSA})
     T = eltype(FSA)
     DF = ndims(FSA)
-    ArrayFSASerializer{T,DF,DF+ndims(A)}(reinterpret(T, A, (size(FSA)..., size(A)...)))
+    ArraySArraySerializer{T,DF,DF+ndims(A)}(reinterpret(T, A, (size(FSA)..., size(A)...)))
 end
 
-# Extensions to Interpolations and FixedSizedArrays
-@generated function vecindex{N}(A::AbstractArray, x::FixedVector{N})
+# Extensions to Interpolations and StaticArrays
+@generated function vecindex{N}(A::AbstractArray, x::SVector{N})
     args = [:(x[$d]) for d = 1:N]
     meta = Expr(:meta, :inline)
     quote
@@ -820,7 +823,7 @@ end
     end
 end
 
-@generated function vecgradient!{N}(g, itp::AbstractArray, x::FixedVector{N})
+@generated function vecgradient!{N}(g, itp::AbstractArray, x::SVector{N})
     args = [:(x[$d]) for d = 1:N]
     meta = Expr(:meta, :inline)
     quote
@@ -831,32 +834,32 @@ end
 
 function convert_to_fixed{T}(u::Array{T}, sz=size(u))
     N = sz[1]
-    convert_to_fixed(Vec{N, T}, u, tail(sz))
+    convert_to_fixed(SVector{N, T}, u, tail(sz))
 end
 
 # Unlike the one above, this is type-stable
-function convert_to_fixed{T,N}(::Type{Vec{N,T}}, u::AbstractArray{T}, sz=tail(size(u)))
+function convert_to_fixed{T,N}(::Type{SVector{N,T}}, u::AbstractArray{T}, sz=tail(size(u)))
     if isbits(T)
-        uf = reinterpret(Vec{N,T}, u, sz)
+        uf = reinterpret(SVector{N,T}, u, sz)
     else
-        uf = Array{Vec{N,T}}(sz)
+        uf = Array{SVector{N,T}}(sz)
         copy_ctf!(uf, u)
     end
     uf
 end
 
-@generated function copy_ctf!{N,T}(dest::Array{Vec{N,T}}, src::Array)
+@generated function copy_ctf!{N,T}(dest::Array{SVector{N,T}}, src::Array)
     exvec = [:(src[offset+$d]) for d=1:N]
     quote
         for i = 1:length(dest)
             offset = (i-1)*N
-            dest[i] = Vec($(exvec...))
+            dest[i] = SVector($(exvec...))
         end
         dest
     end
 end
 
-function convert_from_fixed{N,T}(uf::AbstractArray{Vec{N,T}}, sz=size(uf))
+function convert_from_fixed{N,T}(uf::AbstractArray{SVector{N,T}}, sz=size(uf))
     if isbits(T) && isa(uf, Array)
         u = reinterpret(T, uf, (N, sz...))
     else
@@ -870,10 +873,18 @@ function convert_from_fixed{N,T}(uf::AbstractArray{Vec{N,T}}, sz=size(uf))
     u
 end
 
-# Note this is a bit unsafe as it requires the user to specify C correctly
-@generated function Base.convert{R,C,T}(::Type{Mat{R,C,T}}, v::Vector{Vec{R,T}})
-    args = [:(Tuple(v[$d])) for d = 1:C]
-    :(Mat{R,C,T}(($(args...),)))
+# # Note this is a bit unsafe as it requires the user to specify C correctly
+# @generated function Base.convert{R,C,T}(::Type{SMatrix{Tuple{R,C},T}}, v::Vector{SVector{R,T}})
+#     args = [:(Tuple(v[$d])) for d = 1:C]
+#     :(SMatrix{Tuple{R,C},T}(($(args...),)))
+# end
+
+if VERSION >= v"0.6.0-rc2"
+    include_string("""
+    const RowVectorArray{T} = RowVector{T,Vector{T}}
+
+    Base.reinterpret{T,S,N}(::Type{T}, r::RowVectorArray{S}, dims::Dims{N}) = reinterpret(T, r.vec, dims)
+    """)
 end
 
 end  # module

@@ -11,14 +11,14 @@ Q = rand(2,2); Q = Q'*Q
 num = quadratic(11, 11, [1,-2], Q)
 E0, cntr, Qf = @inferred(RegisterFit.qfit(MismatchArray(num, denom), 1e-3))
 @test abs(E0) < eps()
-@test_approx_eq cntr [1,-2]
-@test_approx_eq Qf Q
+@test cntr ≈ [1,-2]
+@test Qf ≈ Q
 
 num = num+5
 E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), 1e-3)
-@test_approx_eq E0 5
-@test_approx_eq cntr [1,-2]
-@test_approx_eq Qf Q
+@test E0 ≈ 5
+@test cntr ≈ [1,-2]
+@test Qf ≈ Q
 
 num = quadratic(11, 13, [2,-4], Q)
 thresh = 1e-3
@@ -28,8 +28,8 @@ denom = ones(size(num)).*scale
 num = num.*scale
 E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 @test abs(E0) < eps()
-@test_approx_eq cntr [2,-4]
-@test_approx_eq Qf Q
+@test cntr ≈ [2,-4]
+@test Qf ≈ Q
 
 # Degenerate solutions
 Q = [1 0; 0 0]
@@ -37,15 +37,15 @@ denom = ones(13, 11)
 num = quadratic(13, 11, [2,-4], Q)
 E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 @test abs(E0) < eps()
-@test_approx_eq cntr[1] 2
-@test_approx_eq Qf Q
+@test cntr[1] ≈ 2
+@test Qf ≈ Q
 a = rand(2)+0.1
 Q = a*a'
 num = quadratic(13, 11, [2,-4], Q)
 E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 @test abs(E0) < eps()
 @test abs(dot(cntr-[2,-4], a)) < eps()
-@test_approx_eq_eps Qf Q 1e-12
+@test ≈(Qf, Q, atol=1e-12)
 
 # Settings with very few above-threshold data points
 # Just make sure there are no errors
@@ -61,7 +61,7 @@ E0, cntr, Qf = RegisterFit.qfit(MismatchArray(num, denom), thresh)
 A = RegisterFit.qbuild(2, [-1,1], [0.3 0; 0 0.5], (5,5))
 v1 = 0.3*((-5:5)+1).^2
 v2 = 0.5*((-5:5)-1).^2
-@test_approx_eq A.data v1.+v2'+2
+@test A.data ≈ v1.+v2'+2
 
 ### Principal Axes Transformation
 
@@ -75,18 +75,18 @@ fmean, fvar = RegisterFit.principalaxes(fixed)
 tfm = RegisterFit.pat_rotation((fmean, fvar), moving)
 for i = 1:2
     S = tfm[i].scalefwd
-    @test_approx_eq abs(S[1,2]) 1
-    @test_approx_eq abs(S[2,1]) 1
+    @test abs(S[1,2]) ≈ 1
+    @test abs(S[2,1]) ≈ 1
     @test abs(S[1,1]) < 1e-8
     @test abs(S[2,2]) < 1e-8
 end
 
-F = Images.meanfinite(abs(fixed), (1,2))[1]
+F = Images.meanfinite(abs.(fixed), (1,2))[1]
 df = zeros(2)
 movinge = extrapolate(interpolate(moving, BSpline(Linear()), OnGrid()), NaN)
 for i = 1:2
     mov = TransformedArray(movinge, tfm[i])
-    df[i] = Images.meanfinite(abs(fixed-transform(mov)), (1,2))[1]
+    df[i] = Images.meanfinite(abs.(fixed-transform(mov)), (1,2))[1]
 end
 @test minimum(df) < 1e-4*F
 
