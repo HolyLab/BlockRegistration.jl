@@ -51,9 +51,111 @@ use these modules.
 
 ## Stack-by-stack optimization
 
-See the "stack-by-stack registration" section of
-`BlockRegistrationScheduler`.  If you're using this mode, many parts
-of the rest of this README do not apply.
+For large images you might prefer the "stack-by-stack registration"
+section of
+[BlockRegistrationScheduler](https://github.com/HolyLab/BlockRegistrationScheduler).
+If you're using the scheduler, many parts of the rest of this README
+do not apply.
+
+If you want to use BlockRegistration directly, then you might consider
+something like this:
+
+```julia
+using FileIO, Images, Unitful, StaticArrays, AxisArrays, ProgressMeter
+using BlockRegistration
+using RegisterMismatch  # no CUDA (see BlockRegistrationScheduler)
+
+# Some physical units we may need (from the Unitful package)
+const μm = u"μm"  # micrometers
+const s  = u"s"   # seconds
+
+img = load("myimage")  # filename of your image
+# Note: if you're loading from a file type that doesn't return an AxisArray,
+# add something like this:
+#    img = AxisArray(img, (:y, :x, :time), (Δy, Δx, Δt))  # for 2d images + time
+# where Δy, Δx is the pixel spacing along y and x, respectively, and
+# Δt the time between successive frames. (The latter isn't really used for anything.)
+# For example:
+#    img = AxisArray(img, (:x, :y, :time), (1.15μm, 1.15μm, 2s));
+
+# If you need to select a region of interest, do something like
+#    img = view(img, 150:800, 50:600, :)
+
+# Now select your reference ("fixed") image. This chooses the middle
+# frame/stack, assuming you've set a :time axis
+fixedidx = (nimages(img) + 1) ÷ 2  # ÷ can be obtained with "\div[TAB]"
+fixed = img[timeaxis(img)(fixedidx)];
+
+# Important: inspect fixed to make sure it seems OK! You don't want to
+# align to an image with an artifact.
+
+# You can conceivably filter your image if you want, see the Images documentation
+
+## With the preliminaries out of the way, let's get started. Specify a few parameters
+# Choose the maximum amount of movement you want to allow
+mxshift = (30, 30)  # 30 pixels along each spatial axis for a 2d+time image
+# Pick a grid size for your registration. Finer grids allow more
+# "detail" in the deformation, but also have more parameters and
+# therefore require higher SNR data.
+gridsize = (15, 15)
+# Pick a threshold for sufficiency of data. This effectively requires
+# that we have at least 1/4 of a grid-block's worth of data before we
+# take any results seriously.
+thresh_fac=(0.5)^ndims(fixed)
+thresh = (thresh_fac/prod(gridsize)) * length(fixed)
+# Set λrange. See info below. You can alternatively choose a single number, e.g.,
+#     λrange = 0.003
+λrange = logspace(-6, 0, 13)
+
+## A few items can be calculated/allocated in advance
+cs = coords_spatial(img)   # which axes correspond to spatial coordinates?
+aperture_centers = aperture_grid(size(img, cs...), gridsize)
+aperture_width = default_aperture_width(fixed, gridsize)
+knots = map(d->linspace(1,size(fixed,d),gridsize[d]), (1:ndims(fixed)...))
+
+E0 = zeros(gridsize)
+cs = Array{Any}(gridsize)
+Qs = Array{Any}(gridsize)
+
+ap = AffinePenalty(knots, first(λrange))
+
+# Now loop over each timeslice
+ϕs = []
+# If you want to monitor some of the internal variables, you can mimic
+# the use of ϕs above and below
+@showprogress 1 for tidx in indices(img, Axis{:time})
+    moving = view(img, timeaxis(img)(tidx))
+    # Compute the mismatch
+    mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift)
+
+    # Some cameras generate fixed-pattern noise. In such cases you
+    # might want to get rid of it. But _don't_ do this unless you know
+    # you need to, because bias correction can easily make the
+    # registration worse.
+    correctbias!(mms)
+
+    # Construct a quadratic fit to the mismatch data in each block of the grid
+    # We'll use this to help initialize the deformation to a good starting value.
+    for i = 1:length(mms)
+        E0[i], cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)
+    end
+
+    # Prepare for optimization
+    mmis = interpolate_mm!(mms)
+    if isa(λrange, Number)
+        ϕ, mismatch = RegisterOptimize.fixed_λ(cs, Qs, knots, ap, mmis)
+    else
+        ϕ, mismatch, λ, λs, dp, quality = RegisterOptimize.auto_λ(cs, Qs, knots, ap, mmis, λrange)
+    end
+    push!(ϕs, ϕ)  # save the result for later use
+end
+```
+
+If you prefer, you can put everything after the parameter settings
+(`maxshift`, `gridsize`, `thresh`, and `λrange`) into a function that
+you reuse across experiments.
+
+Once you have `ϕs`, see the section on warping below.
 
 ## Whole-experiment optimization
 
@@ -142,7 +244,6 @@ sequence of images looks.
 
 Now that you've selected values for the regularization coefficients, you're ready to perform the optimization:
 
-```jl
 # Illustrative choices of λ and λt. There's no reason these need to be the same.
 λ = 0.003
 λt = 0.003
