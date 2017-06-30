@@ -2,7 +2,7 @@ __precompile__()
 
 module RegisterMismatchCuda
 
-using CUDArt, CUFFT, Images, RegisterCore
+using CUDArt, CUDAdrv, CUFFT, Images, RegisterCore
 
 import Base: close, eltype, ndims
 import CUDArt: free, device, pitchedptr
