@@ -150,7 +150,12 @@ constructed for an image of spatial size `ssize`.  Along each
 dimension the first and last elements are at the image corners.
 """
 function aperture_grid{N}(ssize::Dims{N}, gridsize)
-    length(gridsize) == N || error("ssize and gridsize must have the same length")
+    if length(gridsize) != N
+        if length(gridsize) == N-1
+            info("ssize and gridsize disagree; possible fix is to use a :time axis (AxisArrays) for the image")
+        end
+        error("ssize and gridsize must have the same length, got $ssize and $gridsize")
+    end
     grid = Array{NTuple{N,Float64},N}((gridsize...))
     centers = map(i-> gridsize[i] > 1 ? collect(linspace(1,ssize[i],gridsize[i])) : [(ssize[i]+1)/2], 1:N)
     for I in CartesianRange(size(grid))
