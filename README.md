@@ -244,6 +244,7 @@ sequence of images looks.
 
 Now that you've selected values for the regularization coefficients, you're ready to perform the optimization:
 
+```jl
 # Illustrative choices of λ and λt. There's no reason these need to be the same.
 λ = 0.003
 λt = 0.003
