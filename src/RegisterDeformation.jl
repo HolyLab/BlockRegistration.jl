@@ -181,6 +181,8 @@ function griddeformations{N,FV<:SVector}(u::AbstractArray{FV}, knots::NTuple{N})
     [GridDeformation(view(u, colons..., i), knots) for i = 1:size(u, N+1)]
 end
 
+Base.:(==)(ϕ1::GridDeformation, ϕ2::GridDeformation) = ϕ1.u == ϕ2.u && ϕ1.knots == ϕ2.knots
+
 Base.copy{T,N,A,L}(ϕ::GridDeformation{T,N,A,L}) = (u = copy(ϕ.u); GridDeformation{T,N,typeof(u),L}(u, map(copy, ϕ.knots)))
 
 # # TODO: flesh this out
