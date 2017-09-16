@@ -4,6 +4,9 @@ using RegisterCore, RegisterPenalty, RegisterDeformation, RegisterMismatch, Regi
 
 using RegisterTestUtilities
 
+Base.promote_rule{L,T}(::Type{T}, ::Type{ForwardDiff.Dual{L,T}}) =
+    ForwardDiff.Dual{L,T}
+
 ### Rigid registration
 fixed = sin.(linspace(0,pi,101)).*linspace(5,7,97)'
 tform = tformrotate(pi/12)
