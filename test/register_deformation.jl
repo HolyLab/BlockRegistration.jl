@@ -334,6 +334,13 @@ for (iy,y) in enumerate(linspace(1,30,8))
     end
 end
 
+# https://github.com/HolyLab/BlockRegistrationScheduler/pull/42#discussion_r139291426
+knots = (linspace(0,1,3), linspace(0,1,5))
+u = rand(2, 3, 5)
+ϕ1 = RegisterDeformation.GridDeformation(u, knots)
+ϕ2 = RegisterDeformation.GridDeformation(u, knots)
+@test ϕ1 == ϕ2
+
 # Ensure there is no conflict between Images and RegisterDeformation
 using BlockRegistration, AffineTransforms, Images
 tform = tformrotate(pi/4)
