@@ -268,7 +268,7 @@ function _copy!(dest, rng, src::SVector)
 end
 
 function find_opt(P, b)
-    x = cg(P, b)
+    x = cg(P, b; maxiter=length(b))
     x, true
 end
 
@@ -290,9 +290,23 @@ Base.size(P::AffineQHessian, d) = length(P.Qs)*size(first(P.Qs),1)
 # These compute the gradient of (x'*P*x)/2, where P is the Hessian
 # for the objective in the doc text for initial_deformation.
 function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
-    gridsize = size(P.Qs)
     u = convert_to_fixed(SVector{N,T}, x, size(P.Qs))
     g = similar(u)
+    _A_mul_B!(g, P, u)
+    reinterpret(T, g, size(x))
+end
+
+function Base.LinAlg.A_mul_B!{T,N}(dest::AbstractVector{T},
+                                   P::AffineQHessian{AffinePenalty{T,N}},
+                                   x::AbstractVector{T})
+    u = convert_to_fixed(SVector{N,T}, x, size(P.Qs))
+    g = convert_to_fixed(SVector{N,T}, dest, size(P.Qs))
+    _A_mul_B!(g, P, u)
+    dest
+end
+
+function _A_mul_B!{T,N}(g, P::AffineQHessian{AffinePenalty{T,N}}, u)
+    gridsize = size(P.Qs)
     λ = P.ap.λ
     nspatialgrid = size(P.ap.F, 1)
     P.ap.λ = λ*nspatialgrid/2   # undo the scaling in penalty!
@@ -311,7 +325,7 @@ function (*){T,N}(P::AffineQHessian{AffinePenalty{T,N}}, x::AbstractVector{T})
     for i = 1:length(u)
         g[i] += fac*u[i]
     end
-    reinterpret(T, g, size(x))
+    g
 end
 
 affine_part!(g, P, u) = _affine_part!(g, P.ap, u)
@@ -919,6 +933,15 @@ Base.size(P::TimeHessian, d) = size(P.aqh, d)
 
 function (*){AQH}(P::TimeHessian{AQH}, x::AbstractVector)
     y = P.aqh*x
+    ϕs = vec2vecϕ(P.aqh.Qs, x)
+    penalty!(y, P.λt, ϕs)
+    y
+end
+
+function Base.LinAlg.A_mul_B!{AQH}(y::AbstractVector,
+                                   P::TimeHessian{AQH},
+                                   x::AbstractVector)
+    A_mul_B!(y, P.aqh, x)
     ϕs = vec2vecϕ(P.aqh.Qs, x)
     penalty!(y, P.λt, ϕs)
     y
