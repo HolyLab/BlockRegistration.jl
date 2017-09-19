@@ -540,7 +540,7 @@ warp_type{C<:Colorant, T}(img::AbstractArray{C}, ::Type{T}) = base_colorant_type
 """
 `warp!(dest, src::WarpedArray)` instantiates a `WarpedArray` in the output `dest`.
 """
-@generated function warp!{_,N}(dest::AbstractArray{_,N}, src::WarpedArray)
+@generated function warp!{T,N}(dest::AbstractArray{T,N}, src::WarpedArray)
     ϕxindexes = [:(I[$d]+ux[$d]) for d = 1:N]
     quote
         size(dest) == size(src) || error("dest must have the same size as src")
