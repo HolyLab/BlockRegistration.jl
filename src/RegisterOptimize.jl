@@ -675,7 +675,7 @@ end
 computes an optimal vector-of-deformations `ϕs` for an image sequence,
 using an temporal penalty coefficient `λt`.
 """
-function fixed_λ{T,N,_,L}(cs::AbstractArray{SVector{N,T}}, Qs::AbstractArray{SMatrix{N,N,T,L}}, knots::NTuple{N}, ap::AffinePenalty{_,N}, λt, mmis; ϕs_old = identity, mu_init=0.1, kwargs...)
+function fixed_λ{T,N,TP,L}(cs::AbstractArray{SVector{N,T}}, Qs::AbstractArray{SMatrix{N,N,T,L}}, knots::NTuple{N}, ap::AffinePenalty{TP,N}, λt, mmis; ϕs_old = identity, mu_init=0.1, kwargs...)
     λtT = T(λt)
     apT = convert(AffinePenalty{T,N}, ap)
     maxshift = map(x->(x-1)>>1, size(first(mmis)))
