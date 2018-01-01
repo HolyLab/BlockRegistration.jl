@@ -110,4 +110,6 @@ Base.vec(A::CenterIndexedArray) = vec(A.data)
 Base.minimum(A::CenterIndexedArray, region) = CenterIndexedArray(minimum(A.data, region))
 Base.maximum(A::CenterIndexedArray, region) = CenterIndexedArray(maximum(A.data, region))
 
+Base.show(io::IO, r::CenterIndexedArray) = print(io, "CenterIndexedArray with indices ", repr(indices(r)), "and data", repr(r.data))
+Base.print_matrix(io::IO, r::CenterIndexedArray, args...) = print(io, repr(r.data))
 end  # module
