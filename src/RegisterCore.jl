@@ -9,7 +9,7 @@ using Images, ColorTypes
 using Compat
 
 import Base: +, -, *, /
-import Base: eltype, getindex, ndims, pointer, setindex!, show, size
+import Base: eltype, getindex, ndims, pointer, setindex!, show, size, print_matrix
 import Base: unsafe_getindex
 import CenterIndexedArrays: CenterIndexedArray
 import Images: separate
