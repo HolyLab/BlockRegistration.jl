@@ -118,7 +118,7 @@ function p2rigid(p, SD)
     end
 end
 
-to_float(A, B) = to_float(typeof(one(eltype(A)) - one(eltype(B))), A, B)
+to_float(A, B) = to_float(typeof(oneunit(eltype(A)) - oneunit(eltype(B))), A, B)
 to_float{T<:AbstractFloat}(::Type{T}, A, B) = convert(Array{T}, A), convert(Array{T}, B)
 to_float{T}(::Type{T}, A, B) = convert(Array{Float32}, A), convert(Array{Float32}, B)
 

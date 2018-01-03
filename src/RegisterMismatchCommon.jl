@@ -102,7 +102,7 @@ nanval{T}(::Type{T}) = convert(Float32, NaN)
 """
 function mismatch0{Tf,Tm,N}(fixed::AbstractArray{Tf,N}, moving::AbstractArray{Tm,N}; normalization = :intensity)
     size(fixed) == size(moving) || throw(DimensionMismatch("Size $(size(fixed)) of fixed is not equal to size $(size(moving)) of moving"))
-    num = denom = zero(promote_type(typeof((one(Tf) - one(Tm))^2), typeof(one(Tf)^2+one(Tm)^2)))
+    num = denom = zero(promote_type(typeof((oneunit(Tf) - oneunit(Tm))^2), typeof(oneunit(Tf)^2+oneunit(Tm)^2)))
     if normalization == :intensity
         for i in eachindex(fixed, moving)
             vf = fixed[i]
