@@ -21,6 +21,12 @@ Base.last(r::SymRange) = r.n
 Base.start(r::SymRange) = first(r)
 Base.done(r::SymRange, i) = i == last(r) + 1
 
+@inline function Base.getindex(v::CenterIndexedArrays.SymRange, i::Int)
+    ret = first(v) + i - 1
+    @boundscheck abs(ret) <= v.n || Base.throw_boundserror(v, i)
+    ret
+end
+
 Base.intersect(r::SymRange, s::SymRange) = SymRange(min(last(r), last(s)))
 
 @inline function Base.getindex(r::SymRange, s::SymRange)
