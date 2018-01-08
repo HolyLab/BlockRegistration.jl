@@ -323,3 +323,25 @@ ap = AffinePenalty{Float64,ndims(fixed)}(knots, λ)
 for i = 1:3
     @test -1.01 <= ϕ.u[i][1] <= -0.99
 end
+
+###### Test rotation gridsearch
+
+## 2D
+#note: if a is much smaller than this then it won't find the correct answer due to the mismatch normalization
+a = rand(30,30)
+b = transform(a, tformtranslate([2.0;0.0]) * tformrotate(pi/6))
+tfm0 = tformtranslate([-2.0;0.0]) * tformrotate(-pi/6)
+#note: maxshift must be GREATER than the true shift in order to find the true shift
+tfm, mm = rotation_gridsearch(a, b, [11;11], [pi/6], [11])
+@assert tfm.offset == tfm0.offset 
+@assert tfm.scalefwd == tfm0.scalefwd
+
+## 3D
+#note: if a is much smaller than this then it won't find the correct answer due to the mismatch normalization
+a = rand(30,30,30)
+b = transform(a, tformtranslate([2.0;0.0;0.0]) * tformrotate([1.0;0;0], pi/4))
+tfm0 = tformtranslate([-2.0;0.0;0.0]) * tformrotate([1.0;0;0], -pi/4)
+#note: maxshift must be GREATER than the true shift in order to find the true shift
+tfm, mm = rotation_gridsearch(a, b, [3;3;3], [pi/4, pi/4, pi/4], [5;5;5])
+@assert tfm.offset == tfm0.offset
+@assert tfm.scalefwd == tfm0.scalefwd
