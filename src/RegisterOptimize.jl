@@ -80,7 +80,7 @@ the two images; with non-zero `thresh`, it is not permissible to
 "align" the images by shifting one entirely out of the way of the
 other.
 """
-function optimize_rigid(fixed, moving, A::AffineTransform, maxshift, SD = eye(ndims(A)); thresh=0, tol=1e-4, print_level=0, max_iter=3000)
+function optimize_rigid(fixed, moving, A::AffineTransform, maxshift, SD = eye(ndims(A)), maxrot=pi; thresh=0, tol=1e-4, print_level=0, max_iter=3000)
     objective = RigidOpt(to_float(fixed, moving)..., SD, thresh)
     # Convert initial guess into parameter vector
     R = SD*A.scalefwd/SD
@@ -96,7 +96,7 @@ function optimize_rigid(fixed, moving, A::AffineTransform, maxshift, SD = eye(nd
                          tol=tol,
                          max_iter=max_iter)
     m = MathProgBase.NonlinearModel(solver)
-    ub = T[fill(pi, length(p0)-length(maxshift)); [maxshift...]]
+    ub = T[fill(maxrot, length(p0)-length(maxshift)); [maxshift...]]
     MathProgBase.loadproblem!(m, length(p0), 0, -ub, ub, T[], T[], :Min, objective)
     MathProgBase.setwarmstart!(m, p0)
     MathProgBase.optimize!(m)
