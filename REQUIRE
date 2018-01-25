@@ -20,3 +20,5 @@ Compat 0.44
 ColorTypes
 OffsetArrays
 Optim
+CoordinateTransformations
+Rotations

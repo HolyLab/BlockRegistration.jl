@@ -86,7 +86,7 @@ df = zeros(2)
 movinge = extrapolate(interpolate(moving, BSpline(Linear()), OnGrid()), NaN)
 for i = 1:2
     mov = TransformedArray(movinge, tfm[i])
-    df[i] = Images.meanfinite(abs.(fixed-transform(mov)), (1,2))[1]
+    df[i] = Images.meanfinite(abs.(fixed-AffineTransforms.transform(mov)), (1,2))[1]
 end
 @test minimum(df) < 1e-4*F
 

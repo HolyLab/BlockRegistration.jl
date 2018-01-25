@@ -7,9 +7,12 @@ using RegisterCore, RegisterMismatch, RegisterDeformation, RegisterPenalty, Regi
 using RegisterDeformation: convert_to_fixed, convert_from_fixed
 using Base: Test, tail
 
+using Images, CoordinateTransformations, QuadDIRECT, RegisterMismatch #for qd_rigid.jl
 using Compat
 
 import Base: *
+
+include("qd_rigid.jl")
 
 export
     auto_λ,
@@ -19,7 +22,8 @@ export
     initial_deformation,
     optimize_rigid,
     grid_rotations,
-    rotation_gridsearch
+    rotation_gridsearch,
+    qd_rigid
 
 """
 This module provides convenience functions for minimizing the mismatch
@@ -29,6 +33,8 @@ registration.
 The main functions are:
 
 - `optimize_rigid`: iteratively improve a rigid transformation, given raw images
+- `rotation_gridsearch`: brute-force search a grid of possible rotations and shifts to align raw images
+- `qd_rigid`: find a rotation and shift to align raw images using the QuadDIRECT algorithm
 - `initial_deformation`: provide an initial guess based on mismatch quadratic fits
 - `RegisterOptimize.optimize!`: iteratively improve a deformation, given mismatch data
 - `fixed_λ` and `auto_λ`: "complete" optimizers that generate initial guesses and then find the minimum
@@ -180,7 +186,7 @@ function rotation_gridsearch(fixed, moving, maxshift, maxradians, rgridsz, SD = 
     best_rot = tformeye(ndims(moving))
     best_shift = zeros(nd)
     for rot in rots
-        new_moving = transform(moving, rot)
+        new_moving = AffineTransforms.transform(moving, rot)
         #calc mismatch
         #mm = mismatch(fixed, new_moving, maxshift; normalization=:pixels)
         mm = mismatch(fixed, new_moving, maxshift)
@@ -237,7 +243,7 @@ end
 
 function (d::RigidValue)(x)
     tfm = p2rigid(x, d.SD)
-    mov = transform(d.moving, tfm)
+    mov = AffineTransforms.transform(d.moving, tfm)
     movnan = isnan.(mov)
     mov[movnan] = 0
     f = d.fixed.*map(!, movnan)
