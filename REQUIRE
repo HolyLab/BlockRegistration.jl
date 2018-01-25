@@ -16,7 +16,7 @@ ForwardDiff 0.2.0
 ProgressMeter
 AxisArrays
 Ratios
-Compat 0.19
+Compat 0.44
 ColorTypes
 OffsetArrays
 Optim
