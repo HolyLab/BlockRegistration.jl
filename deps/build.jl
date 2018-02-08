@@ -2,6 +2,10 @@ if Base.find_in_path("RFFT") == nothing
     Pkg.clone("git@github.com:HolyLab/RFFT.jl.git")
 end
 
+if Base.find_in_path("QuadDIRECT") == nothing
+    Pkg.clone("git@github.com:timholy/QuadDIRECT.jl.git")
+end
+
 Pkg.checkout("Optim", "teh/constrained")
 lines = cd(Pkg.dir("NLsolve")) do
     readstring(`git remote`)
