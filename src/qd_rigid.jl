@@ -163,7 +163,7 @@ end
 
 function qd_translate_fine(fixed, moving, SD; initial_tfm = IdentityTransformation(), minwidth = fill(0.01, ndims(fixed)), thresh = 0.1 * sum(abs2.(fixed[.!(isnan.(fixed))])), kwargs...)
     f(x) = translate_mm_slow(x, fixed, moving, thresh, SD; initial_tfm = initial_tfm)
-    upper = fill(1.0, ndims(fixed))
+    upper = fill(2.0, ndims(fixed))
     lower = -upper
     root, x0 = _analyze(f, lower, upper; maxevals=10^4, minwidth=minwidth, print_interval=100, kwargs...)
     box = minimum(root)
