@@ -1,7 +1,7 @@
 using StaticArrays, AffineTransforms, Interpolations, Base.Test
 import BlockRegistration, RegisterOptimize
 using RegisterCore, RegisterPenalty, RegisterDeformation, RegisterMismatch, RegisterFit
-using Images, CoordinateTransformations, Rotations, RegisterOptimize
+using Images, CoordinateTransformations, Rotations, RegisterOptimize, TestImages
 
 using RegisterTestUtilities
 
