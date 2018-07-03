@@ -76,7 +76,7 @@ function qd_rigid_coarse(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh
     box_coarse = minimum(root_coarse)
     tfmcoarse0 = rot(position(box_coarse, x0coarse), moving)
     best_shft, mm = best_shift(fixed, moving, mxshift, thresh; normalization=:intensity, initial_tfm = tfmcoarse0)
-    tfmcoarse = Translation(best_shft) ∘ tfmcoarse0
+    tfmcoarse = tfmcoarse0 ∘ Translation(best_shft)
     return tfmcoarse, mm
 end
 
