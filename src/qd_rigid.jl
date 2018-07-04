@@ -30,8 +30,8 @@ function rot(theta, img, SD=eye(ndims(img)))
 end
 
 #Finds the best shift aligning moving to fixed, possibly after an initial transformation `intial_tfm`
-function best_shift(fixed, moving, mxshift, thresh; normalization=:intensity, initial_tfm=-1)
-    if initial_tfm != -1
+function best_shift(fixed, moving, mxshift, thresh; normalization=:intensity, initial_tfm=IdentityTransformation())
+    if initial_tfm != IdentityTransformation()
         newmov = warp(moving, initial_tfm)
         inds1, inds2 = indices(fixed), indices(newmov)
         inds = ([intersect(x, y) for (x,y) in zip(inds1, inds2)]...)
@@ -44,22 +44,21 @@ function best_shift(fixed, moving, mxshift, thresh; normalization=:intensity, in
 end
 
 #rotation + shift, slow because it warps for every rotation and shift
-function slow_mm(tfm, fixed, moving, thresh, SD; initial_tfm = -1)
+function slow_mm(tfm, fixed, moving, thresh, SD; initial_tfm = IdentityTransformation())
     tfm = tfmx(tfm, moving, SD)
-    if initial_tfm != -1
-        tfm = tfm ∘ initial_tfm #compose with rotation already computed
-    end
+    tfm = initial_tfm ∘ tfm#compose with rotation already computed
     newmov = warp(moving, tfm)
     inds1, inds2 = indices(fixed), indices(newmov)
     inds = ([intersect(x, y) for (x,y) in zip(inds1, inds2)]...)
-    mm = mismatch0(view(fixed, inds...), view(newmov, inds...); normalization=:pixels)
+    mm = mismatch0(view(fixed, inds...), newmov[inds...]; normalization=:intensity)
     rslt = ratio(mm, thresh, Inf)
     return rslt
 end
 
 #rotation + shift, fast because it uses fourier method for shift
-function fast_mm(theta, mxshift, fixed, moving, thresh, SD)
+function fast_mm(theta, mxshift, fixed, moving, thresh, SD; initial_tfm = IdentityTransformation())
     tfm = rot(theta, moving, SD)
+    tfm = initial_tfm ∘ tfm#compose with rotation already computed
     newmov = warp(moving, tfm)
     inds1, inds2 = indices(fixed), indices(newmov)
     inds = ([intersect(x, y) for (x,y) in zip(inds1, inds2)]...)
@@ -67,20 +66,20 @@ function fast_mm(theta, mxshift, fixed, moving, thresh, SD)
     return mm
 end
 
-function qd_rigid_coarse(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh = 0.1 * sum(abs2.(fixed[.!(isnan.(fixed))])), kwargs...)
-    f(x) = fast_mm(x, mxshift, fixed, moving, thresh, SD)
+function qd_rigid_coarse(fixed, moving, mxshift, mxrot, minwidth_rot, SD; initial_tfm = IdentityTransformation(), thresh = 0.1 * sum(abs2.(fixed[.!(isnan.(fixed))])), kwargs...)
+    f(x) = fast_mm(x, mxshift, fixed, moving, thresh, SD; initial_tfm = initial_tfm) #note: if a trial rotation results in image overlap < thresh for all possible shifts then QuadDIRECT throws an error
     upper = [mxrot...]
     lower = -upper
     splits = ([[-x; 0.0; x] for x in mxrot]...)
     root_coarse, x0coarse = analyze(f, splits, lower, upper; maxevals=10^4, minwidth=minwidth_rot, print_interval=100, kwargs...)
     box_coarse = minimum(root_coarse)
-    tfmcoarse0 = rot(position(box_coarse, x0coarse), moving)
+    tfmcoarse0 = initial_tfm ∘ rot(position(box_coarse, x0coarse), moving)
     best_shft, mm = best_shift(fixed, moving, mxshift, thresh; normalization=:intensity, initial_tfm = tfmcoarse0)
     tfmcoarse = tfmcoarse0 ∘ Translation(best_shft)
     return tfmcoarse, mm
 end
 
-function qd_rigid_fine(fixed, moving, mxrot, minwidth, SD; initial_tfm = -1, thresh = 0.1 * sum(abs2.(fixed[.!(isnan.(fixed))])), kwargs...)
+function qd_rigid_fine(fixed, moving, mxrot, minwidth, SD; initial_tfm = IdentityTransformation(), thresh = 0.1 * sum(abs2.(fixed[.!(isnan.(fixed))])), kwargs...)
     f2(x) = slow_mm(x, fixed, moving, thresh, SD; initial_tfm = initial_tfm)
     upper_shft = fill(1, ndims(fixed))
     upper_rot = mxrot
@@ -92,8 +91,7 @@ function qd_rigid_fine(fixed, moving, mxrot, minwidth, SD; initial_tfm = -1, thr
     minwidth = vcat(minwidth_shfts, minwidth_rots)
     root, x0 = analyze(f2, splits, lower, upper; maxevals=10^4, minwidth=minwidth, print_interval=100, kwargs...)
     box = minimum(root)
-    params = position(box, x0)
-    tfmfine = tfmx(position(box, x0), moving)
+    tfmfine = initial_tfm ∘ tfmx(position(box, x0), moving)
     return tfmfine, value(box)
 end
 
@@ -109,12 +107,11 @@ Use `SD` if your axes are not uniformly sampled, for example `SD = diagm(voxelsp
 is a vector encoding the spacing along all axes of the image. `thresh` enforces a certain amount of sum-of-squared-intensity overlap between
 the two images; with non-zero `thresh`, it is not permissible to "align" the images by shifting one entirely out of the way of the other.
 """
-function qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD=eye(ndims(fixed)); thresh=0.1*sum(abs2.(fixed[.!(isnan.(fixed))])), kwargs...)
+function qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD=eye(ndims(fixed)); thresh=0.1*sum(abs2.(fixed[.!(isnan.(fixed))])), tfm0 = IdentityTransformation(), kwargs...)
     mxrot = [mxrot...]
     print("Running coarse step\n")
-    tfm_coarse, mm_coarse = qd_rigid_coarse(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh = thresh, kwargs...)
+    tfm_coarse, mm_coarse = qd_rigid_coarse(fixed, moving, mxshift, mxrot, minwidth_rot, SD; initial_tfm = tfm0, thresh = thresh, kwargs...)
     print("Running fine step\n")
-    tfm_fine, mm_fine = qd_rigid_fine(fixed, moving, mxrot./10, minwidth_rot, SD; initial_tfm = tfm_coarse, thresh = thresh, kwargs...)
-    final_tfm = tfm_fine ∘ tfm_coarse
+    final_tfm, mm_fine = qd_rigid_fine(fixed, moving, mxrot./10, minwidth_rot, SD; initial_tfm = tfm_coarse, thresh = thresh, kwargs...)
     return final_tfm, mm_fine
 end
