@@ -1,7 +1,7 @@
 using StaticArrays, AffineTransforms, Interpolations, Base.Test
 import BlockRegistration, RegisterOptimize
 using RegisterCore, RegisterPenalty, RegisterDeformation, RegisterMismatch, RegisterFit
-using Images, CoordinateTransformations, Rotations, RegisterOptimize
+using Images, CoordinateTransformations, Rotations, RegisterOptimize, TestImages
 
 using RegisterTestUtilities
 
@@ -334,7 +334,7 @@ b = AffineTransforms.transform(a, tformtranslate([2.0;0.0]) * tformrotate(pi/6))
 tfm0 = tformtranslate([-2.0;0.0]) * tformrotate(-pi/6)
 #note: maxshift must be GREATER than the true shift in order to find the true shift
 tfm, mm = rotation_gridsearch(a, b, [11;11], [pi/6], [11])
-@assert tfm.offset == tfm0.offset 
+@assert tfm.offset == tfm0.offset
 @assert tfm.scalefwd == tfm0.scalefwd
 
 ## 3D
@@ -382,3 +382,39 @@ tfm, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh=thres
 
 @test mm < 1e-4
 @test sum(abs.(vcat(tfm0.m[:], tfm0.v) - vcat(RotXYZ(tfm.m)[:], tfm.v))) < 0.1
+
+
+
+
+# tests with standard images
+@testset "tests with standard images" begin
+    img = testimage("cameraman");
+
+    tfm = Translation(@SVector([14, 17]))∘LinearMap(RotMatrix(0.3)) #no distortion for now
+    img2 = warp(img,tfm)
+
+
+    inds = intersect.(indices(img), indices(img2))
+    img = img[inds...]
+    img2 = img2[inds...]
+
+    fixed = img
+
+    mxshift = (100,100) #make sure this isn't too small
+    mxrot = (0.5,)
+    minwidth_rot = fill(0.002, 3)
+    SD = diagm([pixelspacing(fixed)...])
+
+    moving = img2
+
+    tform, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD, rtol=0, fvalue=0.01)
+
+    # imgw = warp(img2, tform)
+    # inds2 = intersect.(indices(img), indices(imgw))
+    # imshow(colorview(RGB,img[inds2...],imgw[inds2...],zeroarray))
+
+    testimg = tfm ∘ tform  #should be the identity matrix
+    @test 0.99 < testimg.m[1,1] < 1.09 &&  0.99 < testimg.m[2,2] < 1.09 && abs(testimg.m[1,2]) < 0.01 && abs(testimg.m[2,1]) < 0.01
+    @test abs(testimg.v[1]) < 2 && abs(testimg.v[2]) < 2
+
+end #tests with standard images
