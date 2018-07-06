@@ -89,6 +89,15 @@ for imsz in ((7,10), (6,5))
     end
 end
 
+# Test for denom overflow with mismatch0
+C16 = N0f16[0.6 0.1; 0.7 0.1]
+D16 = N0f16[0.7 0.1; 0.6 0.1]
+C = Float64.(C16)
+D = Float64.(D16)
+nd = RegisterMismatch.mismatch0(C16, D16; normalization=:intensity)
+@test nd.denom ≈ sum((C.^2).+(D.^2))
+@test nd.num ≈ sum((C.-D).^2)
+
 # Compare direct, global, and apertured
 C = rand(7,9)
 D = rand(7,9)

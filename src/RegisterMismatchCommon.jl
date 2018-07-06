@@ -102,11 +102,14 @@ nanval{T}(::Type{T}) = convert(Float32, NaN)
 """
 function mismatch0{Tf,Tm,N}(fixed::AbstractArray{Tf,N}, moving::AbstractArray{Tm,N}; normalization = :intensity)
     size(fixed) == size(moving) || throw(DimensionMismatch("Size $(size(fixed)) of fixed is not equal to size $(size(moving)) of moving"))
-    num = denom = zero(promote_type(typeof((oneunit(Tf) - oneunit(Tm))^2), typeof(oneunit(Tf)^2+oneunit(Tm)^2)))
+    _mismatch0(zero(Float64), zero(Float64), fixed, moving; normalization=normalization)
+end
+
+function _mismatch0{T,Tf,Tm,N}(num::T, denom::T, fixed::AbstractArray{Tf,N}, moving::AbstractArray{Tm,N}; normalization = :intensity)
     if normalization == :intensity
         for i in eachindex(fixed, moving)
-            vf = fixed[i]
-            vm = moving[i]
+            vf = T(fixed[i])
+            vm = T(moving[i])
             if isfinite(vf) && isfinite(vm)
                 num += (vf-vm)^2
                 denom += vf^2 + vm^2
@@ -114,8 +117,8 @@ function mismatch0{Tf,Tm,N}(fixed::AbstractArray{Tf,N}, moving::AbstractArray{Tm
         end
     elseif normalization == :pixels
         for i in eachindex(fixed, moving)
-            vf = fixed[i]
-            vm = moving[i]
+            vf = T(fixed[i])
+            vm = T(moving[i])
             if isfinite(vf) && isfinite(vm)
                 num += (vf-vm)^2
                 denom += 1
