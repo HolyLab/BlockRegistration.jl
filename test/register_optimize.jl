@@ -1,21 +1,9 @@
 using StaticArrays, AffineTransforms, Interpolations, Base.Test
 import BlockRegistration, RegisterOptimize
 using RegisterCore, RegisterPenalty, RegisterDeformation, RegisterMismatch, RegisterFit
-using Images, CoordinateTransformations, Rotations, RegisterOptimize, TestImages
+using Images, CoordinateTransformations, Rotations, RegisterOptimize
 
 using RegisterTestUtilities
-
-### Rigid registration
-fixed = sin.(linspace(0,pi,101)).*linspace(5,7,97)'
-tform = tformrotate(pi/12)
-moving = AffineTransforms.transform(fixed, tform)
-tform0 = tformeye(2)
-tfrm, fval = RegisterOptimize.optimize_rigid(fixed, moving, tform0, (20,21); tol=1e-2) # print_level=5)
-tfprod = tform*tfrm
-S = tfprod.scalefwd
-@test abs(S[1,2]) < 0.05
-offset = tfprod.offset
-@test all(abs.(offset) .< 0.03)
 
 ###
 ### Global-optimum initial guess
@@ -324,97 +312,3 @@ ap = AffinePenalty{Float64,ndims(fixed)}(knots, λ)
 for i = 1:3
     @test -1.01 <= ϕ.u[i][1] <= -0.99
 end
-
-###### Test rotation gridsearch
-
-## 2D
-#note: if a is much smaller than this then it won't find the correct answer due to the mismatch normalization
-a = rand(30,30)
-b = AffineTransforms.transform(a, tformtranslate([2.0;0.0]) * tformrotate(pi/6))
-tfm0 = tformtranslate([-2.0;0.0]) * tformrotate(-pi/6)
-#note: maxshift must be GREATER than the true shift in order to find the true shift
-tfm, mm = rotation_gridsearch(a, b, [11;11], [pi/6], [11])
-@assert tfm.offset == tfm0.offset
-@assert tfm.scalefwd == tfm0.scalefwd
-
-## 3D
-#note: if a is much smaller than this then it won't find the correct answer due to the mismatch normalization
-a = rand(30,30,30)
-b = AffineTransforms.transform(a, tformtranslate([2.0;0.0;0.0]) * tformrotate([1.0;0;0], pi/4))
-tfm0 = tformtranslate([-2.0;0.0;0.0]) * tformrotate([1.0;0;0], -pi/4)
-#note: maxshift must be GREATER than the true shift in order to find the true shift
-tfm, mm = rotation_gridsearch(a, b, [3;3;3], [pi/4, pi/4, pi/4], [5;5;5])
-@assert tfm.offset == tfm0.offset
-@assert tfm.scalefwd == tfm0.scalefwd
-
-###### Test QuadDIRECT-based rigid registration
-#2D
-moving = rand(50,50)
-tfm0 = Translation(-4.0, 5.0) ∘ recenter(RotMatrix(pi/360), center(moving)) #ground truth
-newfixed = warp(moving, tfm0)
-itp = interpolate(newfixed, BSpline(Linear()), OnGrid())
-etp = extrapolate(itp, NaN)
-fixed = etp[indices(moving)...] #often the warped array has one-too-many pixels in one or more dimensions due to extrapolation
-thresh = 0.1 * sum(abs2.(fixed[.!(isnan.(fixed))]))
-mxshift = [10;10]
-mxrot = pi/90
-minwidth_rot = [0.0002]
-SD = eye(ndims(fixed))
-
-tfm, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh=thresh, rtol = 1e-7, atol = 1e-9 * thresh)
-
-@test sum(abs.(tfm0.m - tfm.m)) < 1e-3
-
-#3D
-moving = rand(30,30,30)
-tfm0 = Translation(-1.0, 2.1,1.2) ∘ recenter(RotXYZ(pi/360, pi/180, pi/220), center(moving)) #ground truth
-newfixed = warp(moving, tfm0)
-itp = interpolate(newfixed, BSpline(Linear()), OnGrid())
-etp = extrapolate(itp, NaN)
-fixed = etp[indices(moving)...] #often the warped array has one-too-many pixels in one or more dimensions due to extrapolation
-thresh = 0.1 * sum(abs2.(fixed[.!(isnan.(fixed))]))
-mxshift = [5;5;5]
-mxrot = [pi/90; pi/90; pi/90]
-minwidth_rot = fill(0.0002, 3)
-SD = eye(ndims(fixed))
-
-tfm, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh=thresh, rtol = 1e-7, atol = 1e-9 * thresh)
-
-@test mm < 1e-4
-@test sum(abs.(vcat(tfm0.m[:], tfm0.v) - vcat(RotXYZ(tfm.m)[:], tfm.v))) < 0.1
-
-
-
-
-# tests with standard images
-@testset "tests with standard images" begin
-    img = testimage("cameraman");
-
-    tfm = Translation(@SVector([14, 17]))∘LinearMap(RotMatrix(0.3)) #no distortion for now
-    img2 = warp(img,tfm)
-
-
-    inds = intersect.(indices(img), indices(img2))
-    img = img[inds...]
-    img2 = img2[inds...]
-
-    fixed = img
-
-    mxshift = (100,100) #make sure this isn't too small
-    mxrot = (0.5,)
-    minwidth_rot = fill(0.002, 3)
-    SD = diagm([pixelspacing(fixed)...])
-
-    moving = img2
-
-    tform, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD, rtol=0, fvalue=0.01)
-
-    # imgw = warp(img2, tform)
-    # inds2 = intersect.(indices(img), indices(imgw))
-    # imshow(colorview(RGB,img[inds2...],imgw[inds2...],zeroarray))
-
-    testimg = tfm ∘ tform  #should be the identity matrix
-    @test 0.99 < testimg.m[1,1] < 1.09 &&  0.99 < testimg.m[2,2] < 1.09 && abs(testimg.m[1,2]) < 0.01 && abs(testimg.m[2,1]) < 0.01
-    @test abs(testimg.v[1]) < 2 && abs(testimg.v[2]) < 2
-
-end #tests with standard images
