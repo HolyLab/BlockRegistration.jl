@@ -36,7 +36,7 @@ function initial_guess_direct(A, cs::Matrix, Qs::Matrix)
     reinterpret(SVector{2,Float64}, x, size(Qs))
 end
 
-function build_Ac_b{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
+function build_Ac_b(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3}) where {Tc,TQ}
     n = size(Qs,3)
     l = size(A,1)
     b = zeros(l*n)
@@ -66,7 +66,7 @@ function build_Ac_b{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
     Ac, b
 end
 
-function initial_guess_direct{Tc,TQ}(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3})
+function initial_guess_direct(A, λt, cs::Array{Tc,3}, Qs::Array{TQ,3}) where {Tc,TQ}
     Ac, b = build_Ac_b(A, λt, cs, Qs)
     x = Ac\b
     reinterpret(SVector{2,Float64}, x, size(Qs))

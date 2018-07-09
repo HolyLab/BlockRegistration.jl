@@ -251,7 +251,7 @@ function pfun(x, ϕs, ap, λt, mmis)
     RegisterPenalty.penalty!(nothing, similarϕ(ϕs, x), identity, ap, λt, mmis)
 end
 # This is needed for handling GradientNumbers
-function similarϕ{Tϕ,N,A,L,Tx}(ϕs::Vector{GridDeformation{Tϕ,N,A,L}}, x::Array{Tx})
+function similarϕ(ϕs::Vector{GridDeformation{Tϕ,N,A,L}}, x::Array{Tx}) where {Tϕ,N,A,L,Tx}
     len = N*length(first(ϕs).u)
     length(x) == len*length(ϕs) || throw(DimensionMismatch("ϕs is incommensurate with a vector of length $(length(x))"))
     xf = RegisterDeformation.convert_to_fixed(SVector{N,Tx}, x, (size(first(ϕs).u)..., length(ϕs)))

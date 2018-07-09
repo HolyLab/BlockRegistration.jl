@@ -6,7 +6,7 @@ using TestImages
 using Base.Test
 
 #add jitter in sampling location, simulating inconsistencies in piezo position when using OCPI under certain conditions
-function jitter{T}(img::Array{T,1}, npix::Float64)
+function jitter(img::Array{T,1}, npix::Float64) where T
     etp = extrapolate(interpolate(img, BSpline(Linear()),OnGrid()), Flat())
     out = zeros(eltype(img), size(img))
     z_def = Float64[]

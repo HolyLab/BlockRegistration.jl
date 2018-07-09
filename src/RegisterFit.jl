@@ -187,7 +187,7 @@ end
 `tf = uisvalid(u, maxshift)` returns `true` if all entries of `u` are
 within the allowed domain.
 """
-function uisvalid{T<:Number}(u::AbstractArray{T}, maxshift)
+function uisvalid(u::AbstractArray{T}, maxshift) where T<:Number
     nd = size(u,1)
     sztail = Base.tail(size(u))
     for j in CartesianRange(sztail), idim = 1:nd
@@ -201,7 +201,7 @@ end
 """
 `u = uclamp!(u, maxshift)` clamps the values of `u` to the allowed domain.
 """
-function uclamp!{T<:Number}(u::AbstractArray{T}, maxshift)
+function uclamp!(u::AbstractArray{T}, maxshift) where T<:Number
     nd = size(u,1)
     sztail = Base.tail(size(u))
     for j in CartesianRange(sztail), idim = 1:nd
@@ -210,7 +210,7 @@ function uclamp!{T<:Number}(u::AbstractArray{T}, maxshift)
     u
 end
 
-function uclamp!{T<:StaticVector}(u::AbstractArray{T}, maxshift)
+function uclamp!(u::AbstractArray{T}, maxshift) where T<:StaticVector
     uclamp!(reinterpret(eltype(T), u, (length(T), size(u)...)), maxshift)
     u
 end
@@ -220,7 +220,7 @@ end
 image `img`.  `center` is the centroid of intensity, and `cov` the
 covariance matrix of the intensity.
 """
-function principalaxes{T,N}(img::AbstractArray{T,N})
+function principalaxes(img::AbstractArray{T,N}) where {T,N}
     Ts = typeof(zero(T)/1)
     psums = pa_init(Ts, size(img))   # partial sums along all but one axis
     # Use a two-pass algorithm
@@ -259,8 +259,8 @@ function principalaxes{T,N}(img::AbstractArray{T,N})
     m, cov
 end
 
-@noinline pa_init{S}(::Type{S}, sz) = [zeros(S, s) for s in sz]
-@noinline function pa_centroid{S}(psums::Vector{Vector{S}})
+@noinline pa_init(::Type{S}, sz) where {S} = [zeros(S, s) for s in sz]
+@noinline function pa_centroid(psums::Vector{Vector{S}}) where S
     s = sum(psums[1])
     s, S[sum(psums[d] .* (1:length(psums[d]))) for d = 1:length(psums)] / s
 end
@@ -331,13 +331,13 @@ end
 
 #### Low-level utilities
 
-@generated function qfit_core!{T,N}(dE::Array{T,2}, V4::Array{T,2}, C::Array{T,4}, mm::Array{NumDenom{T},N}, thresh, umin::NTuple{N,Int}, E0, maxsep::NTuple{N,Int})
+@generated function qfit_core!(dE::Array{T,2}, V4::Array{T,2}, C::Array{T,4}, mm::Array{NumDenom{T},N}, thresh, umin::NTuple{N,Int}, E0, maxsep::NTuple{N,Int}) where {T,N}
     # The cost of generic matrix-multiplies is too high, so we write
     # these out by hand.
     quote
-        @nexprs $N i->(@nexprs $N j->j<i?nothing:(dE_i_j = zero(T); V4_i_j = 0))
+        @nexprs $N i->(@nexprs $N j->j<i ? nothing : (dE_i_j = zero(T); V4_i_j = 0))
         @nexprs $N d->(umin_d = umin[d])
-        @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 = zero(T)))))
+        @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1 ? nothing : (@nexprs $N iter3->iter3<iter2 ? nothing : (@nexprs $N iter4->iter4<iter3 ? nothing : (C_iter1_iter2_iter3_iter4 = zero(T)))))
         @nloops $N i mm begin
             @nif $(N+1) d->(abs(i_d-umin[d]) > maxsep[d]) d->(continue) d->nothing
             nd = @nref $N mm i
@@ -348,12 +348,12 @@ end
                 @nexprs $N d->(v2 += v_d*v_d)
                 r = num/den
                 dE0 = r-E0
-                @nexprs $N j->(@nexprs $N k->k<j?nothing:(dE_j_k += dE0*v_j*v_k; V4_j_k += v2*v_j*v_k))
-                @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C_iter1_iter2_iter3_iter4 += v_iter1*v_iter2*v_iter3*v_iter4))))
+                @nexprs $N j->(@nexprs $N k->k<j ? nothing : (dE_j_k += dE0*v_j*v_k; V4_j_k += v2*v_j*v_k))
+                @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1 ? nothing : (@nexprs $N iter3->iter3<iter2 ? nothing : (@nexprs $N iter4->iter4<iter3 ? nothing : (C_iter1_iter2_iter3_iter4 += v_iter1*v_iter2*v_iter3*v_iter4))))
             end
         end
-        @nexprs $N i->(@nexprs $N j->j<i?(dE[i,j] = dE_j_i; V4[i,j] = V4_j_i):(dE[i,j] = dE_i_j; V4[i,j] = V4_i_j))
-        @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1?nothing:(@nexprs $N iter3->iter3<iter2?nothing:(@nexprs $N iter4->iter4<iter3?nothing:(C[iter1,iter2,iter3,iter4] = C_iter1_iter2_iter3_iter4))))
+        @nexprs $N i->(@nexprs $N j->j<i ? (dE[i,j] = dE_j_i; V4[i,j] = V4_j_i) : (dE[i,j] = dE_i_j; V4[i,j] = V4_i_j))
+        @nexprs $N iter1->(@nexprs $N iter2->iter2<iter1 ? nothing : (@nexprs $N iter3->iter3<iter2 ? nothing : (@nexprs $N iter4->iter4<iter3 ? nothing : (C[iter1,iter2,iter3,iter4] = C_iter1_iter2_iter3_iter4))))
         sortindex = Vector{Int}(4)
         for iter1 = 1:$N, iter2 = 1:$N, iter3 = 1:$N, iter4 = 1:$N
             sortindex[1] = iter1
@@ -462,7 +462,7 @@ function qfit(mm::MismatchArray, thresh::Real, maxsep, opt::Bool)
     E0, uout, QL'*QL
 end
 
-@noinline function sv_inv{T}(::Type{T}, s)
+@noinline function sv_inv(::Type{T}, s) where T
     s1 = s[1]
     sinv = T[v < sqrt(eps(T))*s1 ? zero(T) : 1/v for v in s]
 end
@@ -475,7 +475,7 @@ modifying the data in-place (after computing `cs` and `Qs`).
 
 The return values are suited for input the `fixed_λ` and `auto_λ`.
 """
-function mms2fit!{A<:MismatchArray,N}(mms::AbstractArray{A,N}, thresh)
+function mms2fit!(mms::AbstractArray{A,N}, thresh) where {A<:MismatchArray,N}
     T = eltype(eltype(A))
     gridsize = size(mms)
     cs = Array{SVector{N,T}}(gridsize)
