@@ -361,7 +361,7 @@ mxrot = pi/90
 minwidth_rot = [0.0002]
 SD = eye(ndims(fixed))
 
-tfm, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh=thresh, rtol = 1e-7, atol = 1e-9 * thresh)
+tfm, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh=thresh, maxevals=1000, rtol = 1e-7, atol = 1e-9 * thresh)
 
 @test sum(abs.(tfm0.m - tfm.m)) < 1e-3
 
@@ -378,9 +378,9 @@ mxrot = [pi/90; pi/90; pi/90]
 minwidth_rot = fill(0.0002, 3)
 SD = eye(ndims(fixed))
 
-tfm, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh=thresh, rtol = 1e-7, atol = 1e-9 * thresh)
+tfm, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh=thresh, maxevals=1000, rtol = 1e-7, atol = 1e-9 * thresh)
 
-@test mm < 1e-4
+@test mm < 3e-4
 @test sum(abs.(vcat(tfm0.m[:], tfm0.v) - vcat(RotXYZ(tfm.m)[:], tfm.v))) < 0.1
 
 
@@ -407,7 +407,7 @@ tfm, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD; thresh=thres
 
     moving = img2
 
-    tform, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD, rtol=0, fvalue=0.01)
+    tform, mm = qd_rigid(fixed, moving, mxshift, mxrot, minwidth_rot, SD, maxevals=1000, rtol=0, fvalue=0.01)
 
     # imgw = warp(img2, tform)
     # inds2 = intersect.(indices(img), indices(imgw))
