@@ -9,6 +9,7 @@ import Interpolations: AbstractInterpolation, AbstractExtrapolation
 import ImageTransformations: warp, warp!
 # to avoid `scale` conflict:
 using AffineTransforms: AffineTransform, TransformedArray
+import CoordinateTransformations: compose
 using Compat
 
 export

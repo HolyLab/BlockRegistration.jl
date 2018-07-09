@@ -29,7 +29,7 @@ function dualgrad_data!(g, ϕ, fixed, moving)
     for i in CartesianRange(indices(ϕ.u.itp.coefs))
         for j = 1:nd
             temp = ur[j, i]
-            ur[j, i] = dual(value(temp), 1.0)
+            ur[j, i] = dual(DualNumbers.value(temp), 1.0)
             gr[j, i] = epsilon(RegisterHindsight.penalty_hindsight_data(ϕ, fixed, moving))
             ur[j, i] = temp
         end
@@ -43,7 +43,7 @@ function dualgrad_reg!(g, ap, ϕ)
     for i in CartesianRange(indices(ϕ.u.itp.coefs))
         for j = 1:nd
             temp = ur[j, i]
-            ur[j, i] = dual(value(temp), 1.0)
+            ur[j, i] = dual(DualNumbers.value(temp), 1.0)
             gr[j, i] = epsilon(RegisterHindsight.penalty_hindsight_reg(ap, ϕ))
             ur[j, i] = temp
         end
