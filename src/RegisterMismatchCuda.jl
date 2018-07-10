@@ -61,7 +61,7 @@ close() = (for md in mdlist; unload(md); end; empty!(mdlist); empty!(ptxdict))
 
 const FFTPROD = [2,3]
 
-type NanCorrFFTs{T<:AbstractFloat,N}
+mutable struct NanCorrFFTs{T<:AbstractFloat,N}
     I0::Tuple{CudaPitchedArray{T,N},CudaPitchedArray{Complex{T},N}}
     I1::Tuple{CudaPitchedArray{T,N},CudaPitchedArray{Complex{T},N}}
     I2::Tuple{CudaPitchedArray{T,N},CudaPitchedArray{Complex{T},N}}
@@ -80,7 +80,7 @@ computations over domains of size `aperture_width`, computing the
 mismatch up to shifts of size `maxshift`.  The keyword arguments allow
 you to control the planning process for the FFTs.
 """
-type CMStorage{T<:AbstractFloat,N}
+mutable struct CMStorage{T<:AbstractFloat,N}
     aperture_width::Vector{Float64}
     maxshift::Vector{Int}
     getindexes::Vector{UnitRange{Int}}   # indexes for pulling padded data, in source-coordinates
@@ -97,7 +97,7 @@ type CMStorage{T<:AbstractFloat,N}
     fdshift::Vector{Int} # shift needed to unwrap (fftshift)
     stream
 
-    function CMStorage(::Type{T}, aperture_width::WidthLike, maxshift::DimsLike; stream=null_stream)
+    function CMStorage{T<:AbstractFloat,N}(::Type{T}, aperture_width::WidthLike, maxshift::DimsLike; stream=null_stream) where {T<:AbstractFloat,N}
         blocksize = map(x->ceil(Int,x), aperture_width)
         length(blocksize) == length(maxshift) || error("Dimensionality mismatch")
         padsz = padsize(blocksize, maxshift)
@@ -119,7 +119,7 @@ type CMStorage{T<:AbstractFloat,N}
     end
 end
 # Note: display doesn't do anything
-CMStorage{T<:Real}(::Type{T}, blocksize, maxshift; stream=null_stream, display=false) = CMStorage{T,length(blocksize)}(T, blocksize, maxshift; stream=stream)
+CMStorage(::Type{T}, blocksize, maxshift; stream=null_stream, display=false) where {T<:Real} = CMStorage{T,length(blocksize)}(T, blocksize, maxshift; stream=stream)
 
 function free(cms::CMStorage)
     free(cms.fixed)
@@ -130,8 +130,8 @@ end
 
 device(cms::CMStorage) = device(cms.num[1])
 
-eltype{T,N}(cms::CMStorage{T,N}) = T
- ndims{T,N}(cms::CMStorage{T,N}) = N
+eltype(cms::CMStorage{T,N}) where {T,N} = T
+ ndims(cms::CMStorage{T,N}) where {T,N} = N
 
 # Some tools from Images
 sdims(A::CudaPitchedArray) = ndims(A)
@@ -152,7 +152,7 @@ normalization scheme (`:intensity` or `:pixels`).
 
 This operation is synchronous with respect to the host.
 """
-function mismatch{T<:Real}(::Type{T}, fixed::AbstractArray, moving::AbstractArray, maxshift::DimsLike; normalization = :intensity)
+function mismatch(::Type{T}, fixed::AbstractArray, moving::AbstractArray, maxshift::DimsLike; normalization = :intensity) where T<:Real
     assertsamesize(fixed, moving)
     d_fixed  = CudaPitchedArray(convert(Array{T}, fixed))
     d_moving = CudaPitchedArray(convert(Array{T}, moving))
@@ -162,7 +162,7 @@ function mismatch{T<:Real}(::Type{T}, fixed::AbstractArray, moving::AbstractArra
     mm
 end
 
-function mismatch{T}(fixed::AbstractCudaArray{T}, moving::AbstractCudaArray{T}, maxshift::DimsLike; normalization = :intensity)
+function mismatch(fixed::AbstractCudaArray{T}, moving::AbstractCudaArray{T}, maxshift::DimsLike; normalization = :intensity) where T
     assertsamesize(fixed, moving)
     nd = ndims(fixed)
     maxshiftv = tovec(maxshift)
@@ -199,13 +199,13 @@ in a rectangular grid, you can use an `N`-dimensional array-of-tuples
 (or array-of-vectors) or an `N+1`-dimensional array with the center
 positions specified along the first dimension. See `aperture_grid`.
 """
-function mismatch_apertures{T}(::Type{T},
-                               fixed::AbstractArray,
-                               moving::AbstractArray,
-                               aperture_centers::AbstractArray,
-                               aperture_width::WidthLike,
-                               maxshift::DimsLike;
-                               kwargs...)
+function mismatch_apertures(::Type{T},
+                            fixed::AbstractArray,
+                            moving::AbstractArray,
+                            aperture_centers::AbstractArray,
+                            aperture_width::WidthLike,
+                            maxshift::DimsLike;
+                            kwargs...) where T
     assertsamesize(fixed, moving)
     d_fixed  = CudaPitchedArray(convert(Array{T}, sdata(fixed)))
     d_moving = CudaPitchedArray(convert(Array{T}, moving))
@@ -217,13 +217,13 @@ end
 
 # only difference here relative to RegisterMismatch is the lack of the
 # FFTW keywords
-function mismatch_apertures{T}(fixed::AbstractCudaArray{T},
-                               moving::AbstractCudaArray,
-                               aperture_centers::AbstractArray,
-                               aperture_width::WidthLike,
-                               maxshift::DimsLike;
-                               normalization = :pixels,
-                               kwargs...)
+function mismatch_apertures(fixed::AbstractCudaArray{T},
+                            moving::AbstractCudaArray,
+                            aperture_centers::AbstractArray,
+                            aperture_width::WidthLike,
+                            maxshift::DimsLike;
+                            normalization = :pixels,
+                            kwargs...) where T
     nd = sdims(fixed)
     assertsamesize(fixed,moving)
     (length(aperture_width) == nd && length(maxshift) == nd) || error("Dimensionality mismatch")
@@ -234,7 +234,7 @@ function mismatch_apertures{T}(fixed::AbstractCudaArray{T},
     mms
 end
 
-function fillfixed!{T}(cms::CMStorage{T}, fixed::CudaPitchedArray; f_indexes = ntuple(i->1:size(fixed,i), ndims(fixed)))
+function fillfixed!(cms::CMStorage{T}, fixed::CudaPitchedArray; f_indexes = ntuple(i->1:size(fixed,i), ndims(fixed))) where T
     dev = device(cms)
     device(fixed) == dev || error("Fixed and cms must be on the same device")
     nd = ndims(cms)
@@ -273,7 +273,7 @@ end
 computes the mismatch as a function of shift, storing the result in
 `mm`. The `fixed` image has been prepared in `cms`, a `CMStorage` object.
 """
-function mismatch!{T}(mm::MismatchArray, cms::CMStorage{T}, moving::CudaPitchedArray; normalization = :intensity, m_offset = ntuple(i->0, ndims(cms)))
+function mismatch!(mm::MismatchArray, cms::CMStorage{T}, moving::CudaPitchedArray; normalization = :intensity, m_offset = ntuple(i->0, ndims(cms))) where T
     global ptxdict
     dev = device(cms)
     device(moving) == dev || error("Moving and cms must be on the same device")

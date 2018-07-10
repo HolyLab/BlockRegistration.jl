@@ -9,7 +9,7 @@ export Counter
 #
 # Stolen from Grid.jl. Useful when you want to do more math on the iterator.
 
-immutable Counter
+struct Counter
     max::Vector{Int}
 end
 Counter(sz::Tuple) = Counter(Int[sz...])

@@ -11,7 +11,7 @@ export CenterIndexedArray
 
 ## SymRange, an AbstractUnitRange that's symmetric around 0
 # These are used as indices for CenterIndexedArrays
-immutable SymRange <: AbstractUnitRange{Int}
+struct SymRange <: AbstractUnitRange{Int}
     n::Int  # goes from -n:n
 end
 
@@ -34,9 +34,9 @@ Base.intersect(r::SymRange, s::SymRange) = SymRange(min(last(r), last(s)))
     s
 end
 
-Base.promote_rule{UR<:AbstractUnitRange}(::Type{SymRange}, ::Type{UR}) =
+Base.promote_rule(::Type{SymRange}, ::Type{UR}) where {UR<:AbstractUnitRange} =
     UR
-Base.promote_rule{T2}(::Type{UnitRange{T2}}, ::Type{SymRange}) =
+Base.promote_rule(::Type{UnitRange{T2}}, ::Type{SymRange}) where {T2} =
     UnitRange{promote_type(T2, Int)}
 function Base.convert(::Type{SymRange}, r::AbstractUnitRange)
     first(r) == -last(r) || error("cannot convert $r to a SymRange")
@@ -53,26 +53,26 @@ A `CenterIndexedArray` is one for which the array center has indexes
 CenterIndexedArray(A) "converts" `A` into a CenterIndexedArray. All
 the sizes of `A` must be odd.
 """
-immutable CenterIndexedArray{T,N,A<:AbstractArray} <: AbstractArray{T,N}
+struct CenterIndexedArray{T,N,A<:AbstractArray} <: AbstractArray{T,N}
     data::A
     halfsize::NTuple{N,Int}
 
-    function (::Type{CenterIndexedArray{T,N,A}}){T,N,A<:AbstractArray}(data::A)
+    function CenterIndexedArray{T,N,A}(data::A) where {T,N,A<:AbstractArray}
         new{T,N,A}(data, _halfsize(data))
     end
 end
 
-CenterIndexedArray{T,N}(A::AbstractArray{T,N}) = CenterIndexedArray{T,N,typeof(A)}(A)
-CenterIndexedArray{T}(::Type{T}, dims) = CenterIndexedArray(Array{T}(dims))
-CenterIndexedArray{T}(::Type{T}, dims...) = CenterIndexedArray(Array{T}(dims))
+CenterIndexedArray(A::AbstractArray{T,N}) where {T,N} = CenterIndexedArray{T,N,typeof(A)}(A)
+CenterIndexedArray(::Type{T}, dims) where {T} = CenterIndexedArray(Array{T}(dims))
+CenterIndexedArray(::Type{T}, dims...) where {T} = CenterIndexedArray(Array{T}(dims))
 
 # This is the AbstractArray default, but do this just to be sure
-@compat Base.IndexStyle{A<:CenterIndexedArray}(::Type{A}) = IndexCartesian()
+Base.IndexStyle(::Type{A}) where {A<:CenterIndexedArray} = IndexCartesian()
 
 Base.size(A::CenterIndexedArray) = size(A.data)
 Base.indices(A::CenterIndexedArray) = map(SymRange, A.halfsize)
 
-function Base.similar{T}(A::CenterIndexedArray, ::Type{T}, inds::Tuple{SymRange,Vararg{SymRange}})
+function Base.similar(A::CenterIndexedArray, ::Type{T}, inds::Tuple{SymRange,Vararg{SymRange}}) where T
     data = Array{T}(map(length, inds))
     CenterIndexedArray(data)
 end
@@ -86,7 +86,7 @@ function _halfsize(A::AbstractArray)
     map(n->n>>UInt(1), size(A))
 end
 
-@inline function Base.getindex{T,N}(A::CenterIndexedArray{T,N}, i::Vararg{Number,N})
+@inline function Base.getindex(A::CenterIndexedArray{T,N}, i::Vararg{Number,N}) where {T,N}
     @boundscheck checkbounds(A, i...)
     @inbounds val = A.data[map(offset, A.halfsize, i)...]
     val
@@ -96,16 +96,16 @@ offset(off, i) = off+i+1
 
 const Index = Union{Colon,AbstractVector}
 
-Base.getindex{T}(A::CenterIndexedArray{T,1}, I::Index) = CenterIndexedArray([A[i] for i in _cindex(A, 1, I)])
-Base.getindex{T}(A::CenterIndexedArray{T,2}, I::Index, J::Index) = CenterIndexedArray([A[i,j] for i in _cindex(A,1,I), j in _cindex(A,2,J)])
-Base.getindex{T}(A::CenterIndexedArray{T,3}, I::Index, J::Index, K::Index) = CenterIndexedArray([A[i,j,k] for i in _cindex(A,1,I), j in _cindex(A,2,J), k in _cindex(A,3,K)])
+Base.getindex(A::CenterIndexedArray{T,1}, I::Index) where {T} = CenterIndexedArray([A[i] for i in _cindex(A, 1, I)])
+Base.getindex(A::CenterIndexedArray{T,2}, I::Index, J::Index) where {T} = CenterIndexedArray([A[i,j] for i in _cindex(A,1,I), j in _cindex(A,2,J)])
+Base.getindex(A::CenterIndexedArray{T,3}, I::Index, J::Index, K::Index) where {T} = CenterIndexedArray([A[i,j,k] for i in _cindex(A,1,I), j in _cindex(A,2,J), k in _cindex(A,3,K)])
 
 _cindex(A::CenterIndexedArray, d, I::Range) = convert(SymRange, I)
 _cindex(A::CenterIndexedArray, d, I::AbstractVector) = error("unsupported, use a range")
 _cindex(A::CenterIndexedArray, d, ::Colon) = SymRange(A.halfsize[d])
 
 
-@inline function Base.setindex!{T,N}(A::CenterIndexedArray{T,N}, v, i::Vararg{Number,N})
+@inline function Base.setindex!(A::CenterIndexedArray{T,N}, v, i::Vararg{Number,N}) where {T,N}
     @boundscheck checkbounds(A, i...)
     @inbounds A.data[map(offset, A.halfsize, i)...] = v
     v

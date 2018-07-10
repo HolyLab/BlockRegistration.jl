@@ -6,7 +6,7 @@ using TestImages
 using Base.Test
 
 #add jitter in sampling location, simulating inconsistencies in piezo position when using OCPI under certain conditions
-function jitter{T}(img::Array{T,1}, npix::Float64)
+function jitter(img::Array{T,1}, npix::Float64) where T
     etp = extrapolate(interpolate(img, BSpline(Linear()),OnGrid()), Flat())
     out = zeros(eltype(img), size(img))
     z_def = Float64[]
@@ -29,7 +29,7 @@ function dualgrad_data!(g, ϕ, fixed, moving)
     for i in CartesianRange(indices(ϕ.u.itp.coefs))
         for j = 1:nd
             temp = ur[j, i]
-            ur[j, i] = dual(value(temp), 1.0)
+            ur[j, i] = dual(DualNumbers.value(temp), 1.0)
             gr[j, i] = epsilon(RegisterHindsight.penalty_hindsight_data(ϕ, fixed, moving))
             ur[j, i] = temp
         end
@@ -43,7 +43,7 @@ function dualgrad_reg!(g, ap, ϕ)
     for i in CartesianRange(indices(ϕ.u.itp.coefs))
         for j = 1:nd
             temp = ur[j, i]
-            ur[j, i] = dual(value(temp), 1.0)
+            ur[j, i] = dual(DualNumbers.value(temp), 1.0)
             gr[j, i] = epsilon(RegisterHindsight.penalty_hindsight_reg(ap, ϕ))
             ur[j, i] = temp
         end

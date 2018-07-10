@@ -192,7 +192,7 @@ This representation is efficient for `Interpolations.jl`, because it
 allows interpolation to be performed on "both arrays" at once without
 recomputing the interpolation coefficients.
 """
-immutable NumDenom{T<:Number}
+struct NumDenom{T<:Number}
     num::T
     denom::T
 end
@@ -206,14 +206,14 @@ NumDenom(n, d) = NumDenom(promote(n, d)...)
 (*)(n::Number, p::NumDenom) = NumDenom(n*p.num, n*p.denom)
 (*)(p::NumDenom, n::Number) = n*p
 (/)(p::NumDenom, n::Number) = NumDenom(p.num/n, p.denom/n)
-Base.one{T}(::Type{NumDenom{T}}) = NumDenom(one(T),one(T))
+Base.one(::Type{NumDenom{T}}) where {T} = NumDenom(one(T),one(T))
 Base.one(p::NumDenom) = one(typeof(p))
-Base.zero{T}(::Type{NumDenom{T}}) = NumDenom(zero(T),zero(T))
+Base.zero(::Type{NumDenom{T}}) where {T} = NumDenom(zero(T),zero(T))
 Base.zero(p::NumDenom) = zero(typeof(p))
-Base.promote_rule{T1,T2<:Number}(::Type{NumDenom{T1}}, ::Type{T2}) = NumDenom{promote_type(T1,T2)}
-Base.eltype{T}(::Type{NumDenom{T}}) = T
-Base.convert{T}(::Type{NumDenom{T}}, p::NumDenom{T}) = p
-Base.convert{T}(::Type{NumDenom{T}}, p::NumDenom) = NumDenom{T}(p.num, p.denom)
+Base.promote_rule(::Type{NumDenom{T1}}, ::Type{T2}) where {T1,T2<:Number} = NumDenom{promote_type(T1,T2)}
+Base.eltype(::Type{NumDenom{T}}) where {T} = T
+Base.convert(::Type{NumDenom{T}}, p::NumDenom{T}) where {T} = p
+Base.convert(::Type{NumDenom{T}}, p::NumDenom) where {T} = NumDenom{T}(p.num, p.denom)
 Base.show(io::IO, p::NumDenom) = print(io, "NumDenom(", p.num, ",", p.denom, ")")
 function Base.showcompact(io::IO, p::NumDenom)
     print(io, "NumDenom(")
@@ -223,7 +223,7 @@ function Base.showcompact(io::IO, p::NumDenom)
     print(io, ")")
 end
 
-@compat const MismatchArray{ND<:NumDenom,N,A} = CenterIndexedArray{ND,N,A}
+const MismatchArray{ND<:NumDenom,N,A} = CenterIndexedArray{ND,N,A}
 
 maxshift(A::MismatchArray) = A.halfsize
 
@@ -232,7 +232,7 @@ maxshift(A::MismatchArray) = A.halfsize
 `(num,denom)` into a single `MismatchArray`.  This is useful
 preparation for interpolation.
 """
-function (::Type{M}){M<:MismatchArray}(num::AbstractArray, denom::AbstractArray)
+function (::Type{M})(num::AbstractArray, denom::AbstractArray) where M<:MismatchArray
     size(num) == size(denom) || throw(DimensionMismatch("num and denom must have the same size"))
     T = promote_type(eltype(num), eltype(denom))
     numdenom = CenterIndexedArray(NumDenom{T}, size(num))
@@ -270,7 +270,7 @@ end
 
 `mms = mismatcharrays(nums, denom)`, for `denom` a single array, uses the same `denom` array for all `nums`.
 """
-function mismatcharrays{A<:AbstractArray,T<:Number}(nums::AbstractArray{A}, denom::AbstractArray{T})
+function mismatcharrays(nums::AbstractArray{A}, denom::AbstractArray{T}) where {A<:AbstractArray,T<:Number}
     first = true
     local mms
     for i in eachindex(nums)
@@ -285,7 +285,7 @@ function mismatcharrays{A<:AbstractArray,T<:Number}(nums::AbstractArray{A}, deno
     mms
 end
 
-function mismatcharrays{A1<:AbstractArray,A2<:AbstractArray}(nums::AbstractArray{A1}, denoms::AbstractArray{A2})
+function mismatcharrays(nums::AbstractArray{A1}, denoms::AbstractArray{A2}) where {A1<:AbstractArray,A2<:AbstractArray}
     size(nums) == size(denoms) || throw(DimensionMismatch("nums and denoms arrays must have the same number of apertures"))
     first = true
     local mms
@@ -304,7 +304,7 @@ end
 `num, denom = separate(mm)` splits an `AbstractArray{NumDenom}` into separate
 numerator and denominator arrays.
 """
-function separate{T}(data::AbstractArray{NumDenom{T}})
+function separate(data::AbstractArray{NumDenom{T}}) where T
     num = Array{T}(size(data))
     denom = similar(num)
     for I in eachindex(data)
@@ -320,7 +320,7 @@ function separate(mm::MismatchArray)
     CenterIndexedArray(num), CenterIndexedArray(denom)
 end
 
-function separate{M<:MismatchArray}(mma::AbstractArray{M})
+function separate(mma::AbstractArray{M}) where M<:MismatchArray
     T = eltype(eltype(M))
     nums = Array{CenterIndexedArray{T,ndims(M)}}(size(mma))
     denoms = similar(nums)
@@ -336,7 +336,7 @@ end
 `denom < thresh`, and `fillval`'s type determines the type of the
 output. The default is NaN.
 """
-function ratio{T}(mm::MismatchArray, thresh, fillval::T)
+function ratio(mm::MismatchArray, thresh, fillval::T) where T
     out = CenterIndexedArray(T, size(mm))
     for I in eachindex(mm)
         nd = mm[I]
@@ -345,12 +345,12 @@ function ratio{T}(mm::MismatchArray, thresh, fillval::T)
     out
 end
 ratio(mm::MismatchArray, thresh) = ratio(mm, thresh, convert(eltype(eltype(mm)), NaN))
-@inline ratio{T}(nd::NumDenom{T}, thresh, fillval=convert(T,NaN)) = nd.denom < thresh ? fillval : nd.num/nd.denom
+@inline ratio(nd::NumDenom{T}, thresh, fillval=convert(T,NaN)) where {T} = nd.denom < thresh ? fillval : nd.num/nd.denom
 
-ratio{T<:Real}(r::CenterIndexedArray{T}, thresh, fillval=convert(T,NaN)) = r
+ratio(r::CenterIndexedArray{T}, thresh, fillval=convert(T,NaN)) where {T<:Real} = r
 
-(::Type{M}){M<:MismatchArray,T}(::Type{T}, dims) = CenterIndexedArray(NumDenom{T}, dims)
-(::Type{M}){M<:MismatchArray,T}(::Type{T}, dims...) = CenterIndexedArray(NumDenom{T}, dims)
+(::Type{M})(::Type{T}, dims) where {M<:MismatchArray,T} = CenterIndexedArray(NumDenom{T}, dims)
+(::Type{M})(::Type{T}, dims...) where {M<:MismatchArray,T} = CenterIndexedArray(NumDenom{T}, dims)
 
 function Base.copy!(M::MismatchArray, nd::Tuple{AbstractArray, AbstractArray})
     num, denom = nd
@@ -394,7 +394,7 @@ arrays.
     end
 end
 
-function indmin_mismatch{T<:Number}(r::CenterIndexedArray{T})
+function indmin_mismatch(r::CenterIndexedArray{T}) where T<:Number
     ind = ind2sub(size(r), indmin(r.data))
     indctr = map(d->ind[d]-(size(r,d)+1)>>1, (1:ndims(r)...))
     CartesianIndex(indctr)
@@ -415,7 +415,7 @@ If you do not wish to highpass-filter along a particular axis, put
 You may optionally specify the element type of the result, which for
 `Integer` or `FixedPoint` inputs defaults to `Float32`.
 """
-function highpass{T}(::Type{T}, data::AbstractArray, sigma)
+function highpass(::Type{T}, data::AbstractArray, sigma) where T
     if any(isinf, sigma)
         datahp = convert(Array{T,ndims(data)}, data)
     else
@@ -424,7 +424,7 @@ function highpass{T}(::Type{T}, data::AbstractArray, sigma)
     datahp[datahp .< 0] = 0  # truncate anything below 0
     datahp
 end
-highpass{T<:AbstractFloat}(data::AbstractArray{T}, sigma) = highpass(T, data, sigma)
+highpass(data::AbstractArray{T}, sigma) where {T<:AbstractFloat} = highpass(T, data, sigma)
 highpass(data::AbstractArray, sigma) = highpass(Float32, data, sigma)
 
 
@@ -436,13 +436,8 @@ parent.
 See also `trimmedview`.
 """
 paddedview(A::SubArray) = _paddedview(A, (), (), A.indexes...)
-if VERSION < v"0.6.0-dev"
-    _paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
-        SubArray(A.parent, newindexes, newsize)
-else
-    _paddedview{T,N,P,I}(A::SubArray{T,N,P,I}, newindexes, newsize) =
-        SubArray(A.parent, newindexes)
-end
+_paddedview(A::SubArray{T,N,P,I}, newindexes, newsize) where {T,N,P,I} =
+    SubArray(A.parent, newindexes)
 @inline function _paddedview(A, newindexes, newsize, index, indexes...)
     d = length(newindexes)+1
     _paddedview(A, (newindexes..., pdindex(A.parent, d, index)), pdsize(A.parent, newsize, d, index), indexes...)
@@ -480,7 +475,7 @@ end
 
 
 # For faster and type-stable slicing
-immutable ColonFun end
-(::Type{ColonFun})(::Int) = Colon()
+struct ColonFun end
+ColonFun(::Int) = Colon()
 
 end

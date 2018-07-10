@@ -7,14 +7,14 @@ using Compat
 using Base.Cartesian
 using Interpolations: sqr, SimpleRatio, BSplineInterpolation, DimSpec, Degree
 
-@compat const InterpolatingDeformation{T,N,A<:ScaledInterpolation} = GridDeformation{T,N,A}
+const InterpolatingDeformation{T,N,A<:ScaledInterpolation} = GridDeformation{T,N,A}
 
-function penalty_hindsight{T<:Real}(ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving)
+function penalty_hindsight(ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving) where T<:Real
     convert(T, penalty_hindsight_reg(ap, ϕ) +
                penalty_hindsight_data(ϕ, fixed, moving))
 end
 
-function penalty_hindsight!{T<:Real}(g, ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving)
+function penalty_hindsight!(g, ϕ::InterpolatingDeformation, ap::AffinePenalty{T}, fixed, moving) where T<:Real
     gd = similar(g)
     ret = convert(T, penalty_hindsight_reg!(g, ap, ϕ) +
                   penalty_hindsight_data!(gd, ϕ, fixed, moving))
@@ -25,9 +25,9 @@ function penalty_hindsight!{T<:Real}(g, ϕ::InterpolatingDeformation, ap::Affine
 end
 
 # For comparison of two deformations
-function penalty_hindsight{T<:Real}(ϕ1::InterpolatingDeformation,
-                                    ϕ2::InterpolatingDeformation,
-                                    ap::AffinePenalty{T}, fixed, moving)
+function penalty_hindsight(ϕ1::InterpolatingDeformation,
+                           ϕ2::InterpolatingDeformation,
+                           ap::AffinePenalty{T}, fixed, moving) where T<:Real
     indices(ϕ1.u) == indices(ϕ2.u) || throw(DimensionMismatch("The indices of the two deformations must match, got $(indices(U1)) and $(indices(U2))"))
     rp1, rp2 = penalty_hindsight_reg(ap, ϕ1), penalty_hindsight_reg(ap, ϕ2)
     dp1, dp2 = penalty_hindsight_data(ϕ1, ϕ2, fixed, moving)
@@ -47,9 +47,9 @@ function penalty_hindsight_reg!(g, ap, ϕ::InterpolatingDeformation)
     penalty!(g, ap, itp.coefs)
 end
 
-@generated function penalty_hindsight_data{T,N,T1,T2,A}(ϕ::InterpolatingDeformation{T,N,A},
-                                                        fixed::AbstractArray{T1,N},
-                                                        moving::AbstractInterpolation{T2,N})
+@generated function penalty_hindsight_data(ϕ::InterpolatingDeformation{T,N,A},
+                                           fixed::AbstractArray{T1,N},
+                                           moving::AbstractInterpolation{T2,N}) where {T,N,T1,T2,A}
     IT = Interpolations.itptype(A)
     uindexes = scaledindexes(IT, N)
     ϕxindexes = [:(I[$d] + u[$d]) for d = 1:N]
@@ -79,24 +79,24 @@ end
 # To compute the derivative with respect to the deformation, it's
 # efficient to re-use the coefficients computed for the shift. We do
 # that by exploiting the generated code in Interpolations.
-function penalty_hindsight_data!{T,N,T1,T2}(g,
-                                            ϕ::InterpolatingDeformation{T,N},
-                                            fixed::AbstractArray{T1,N},
-                                            moving::AbstractInterpolation{T2,N})
+function penalty_hindsight_data!(g,
+                                 ϕ::InterpolatingDeformation{T,N},
+                                 fixed::AbstractArray{T1,N},
+                                 moving::AbstractInterpolation{T2,N}) where {T,N,T1,T2}
     _penalty_hindsight_data!(g, ϕ.u.itp, ϕ.knots, fixed, moving)
 end
 
-@generated function _penalty_hindsight_data!{T,N,TCoefs,IT,GT,Pad,T1,T2}(
+@generated function _penalty_hindsight_data!(
     g,
     itp::BSplineInterpolation{T,N,TCoefs,IT,GT,Pad},
     knots,
     fixed::AbstractArray{T1,N},
-    moving::AbstractInterpolation{T2,N})
+    moving::AbstractInterpolation{T2,N}) where {T,N,TCoefs,IT,GT,Pad,T1,T2}
 
     penalty_hindsight_data!_gen(N, IT, Pad)
 end
 
-function penalty_hindsight_data!_gen{IT}(N, ::Type{IT}, Pad)
+function penalty_hindsight_data!_gen(N, ::Type{IT}, Pad) where IT
     uindexes = scaledindexes(IT, N)
     xassign = Expr(:block, map((d,e)->Expr(:(=), Symbol("x_",d), e), 1:N, uindexes)...)
     ϕxindexes = [:(I[$d] + y[$d]) for d = 1:N]
@@ -145,10 +145,10 @@ function penalty_hindsight_data!_gen{IT}(N, ::Type{IT}, Pad)
     end
 end
 
-scaledindexes{IT}(::Type{IT}, N) =
+scaledindexes(::Type{IT}, N) where {IT} =
     map(d->Interpolations.iextract(IT, d) != NoInterp ? :(Interpolations.coordlookup(knots[$d], I[$d])) : :(I[$d]), 1:N)
 
-interprange{IT}(::Type{IT}, N::Integer) = _interprange((), IT, N)
+interprange(::Type{IT}, N::Integer) where {IT} = _interprange((), IT, N)
 function _interprange(out, IT, N)
     if length(out) < N
         return _interprange((out..., interprange(Interpolations.iextract(IT, length(out)+1))), IT, N)
@@ -158,13 +158,13 @@ end
 interprange(::Type{NoInterp}) = 0:0
 interprange(::Type{BSpline{Constant}}) = 0:0
 interprange(::Type{BSpline{Linear}}) = 0:1
-interprange{Q<:Quadratic}(::Type{BSpline{Q}}) = -1:1
-interprange{C<:Cubic}(::Type{BSpline{C}}) = -1:2
+interprange(::Type{BSpline{Q}}) where {Q<:Quadratic} = -1:1
+interprange(::Type{BSpline{C}}) where {C<:Cubic} = -1:2
 
-coef_gen{IT,N}(::Type{IT}, d::Integer, offsets::CartesianIndex{N}) =
+coef_gen(::Type{IT}, d::Integer, offsets::CartesianIndex{N}) where {IT,N} =
     coef_gen(Interpolations.iextract(IT, d+1), IT, d+1, offsets)
 
-function coef_gen{D<:Degree,IT<:DimSpec{BSpline}, N}(::Type{BSpline{D}}, ::Type{IT}, d::Integer, offsets::CartesianIndex{N})
+function coef_gen(::Type{BSpline{D}}, ::Type{IT}, d::Integer, offsets::CartesianIndex{N}) where {D<:Degree,IT<:DimSpec{BSpline}, N}
     if d <= N
         sym = offsets[d] == -1 ? Symbol("cm_",d) :
               offsets[d] ==  0 ? Symbol("c_",d) :
@@ -176,10 +176,10 @@ function coef_gen{D<:Degree,IT<:DimSpec{BSpline}, N}(::Type{BSpline{D}}, ::Type{
     end
 end
 
-@generated function penalty_hindsight_data{T,N,T1,T2}(ϕ1::InterpolatingDeformation{T,N},
-                                                      ϕ2::InterpolatingDeformation{T,N},
-                                                      fixed::AbstractArray{T1,N},
-                                                      moving::AbstractInterpolation{T2,N})
+@generated function penalty_hindsight_data(ϕ1::InterpolatingDeformation{T,N},
+                                           ϕ2::InterpolatingDeformation{T,N},
+                                           fixed::AbstractArray{T1,N},
+                                           moving::AbstractInterpolation{T2,N}) where {T,N,T1,T2}
     uindexes = [:((I[$d]-offsets[$d])/steps[$d] + 1) for d = 1:N]
     ϕ1xindexes = [:(I[$d] + u1[$d]) for d = 1:N]
     ϕ2xindexes = [:(I[$d] + u2[$d]) for d = 1:N]
