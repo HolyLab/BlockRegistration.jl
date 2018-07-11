@@ -23,7 +23,9 @@ export
     optimize_rigid,
     grid_rotations,
     rotation_gridsearch,
-    qd_rigid
+    qd_translate,
+    qd_rigid,
+    qd_affine
 
 """
 This module provides convenience functions for minimizing the mismatch
