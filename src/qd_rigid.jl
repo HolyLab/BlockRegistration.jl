@@ -139,7 +139,7 @@ end
 
 ###########  Rigid Transformation (rotation + translation) Search ############
 
-update_SD(SD, tfm::Union{LinearMap, AffineMap}) = update_SD(SD, tfm.m)
+update_SD(SD, tfm::Union{LinearMap, AffineMap}) = update_SD(SD, tfm.linear)
 update_SD(SD, tfm::Transformation) = SD
 update_SD(SD::AbstractArray, m::StaticArray) = update_SD(SD, Array(m))
 update_SD(SD::AbstractArray, m::AbstractArray) = m\SD*m
