@@ -53,7 +53,7 @@ end
 
     tfm, mm = qd_translate(fixed, moving, mxshift; maxevals=1000, thresh=thresh, rtol=0)
 
-    @test sum(abs.(tfm0.v - tfm.v)) < 1e-3
+    @test sum(abs.(tfm0.translation - tfm.translation)) < 1e-3
 
     #3D
     moving = rand(30,30,30)
@@ -67,7 +67,7 @@ end
 
     tfm, mm = qd_translate(fixed, moving, mxshift; maxevals=1000, thresh=thresh, rtol=0)
 
-    @test sum(abs.(tfm0.v - tfm.v)) < 0.1
+    @test sum(abs.(tfm0.translation - tfm.translation)) < 0.1
 
     ######Rotations + Translations
     #2D
@@ -85,7 +85,7 @@ end
 
     tfm, mm = qd_rigid(centered(fixed), moving, mxshift, mxrot, minwidth_rot, SD; thresh=thresh, maxevals=1000, rtol=0, fvalue=1e-8)
 
-    @test sum(abs.(tfm0.m - tfm.m)) < 1e-3
+    @test sum(abs.(tfm0.linear - tfm.linear)) < 1e-3
 
     #3D
     moving = centered(rand(30,30,30))
@@ -102,7 +102,7 @@ end
 
     tfm, mm = qd_rigid(centered(fixed), moving, mxshift, mxrot, minwidth_rot, SD; thresh=thresh, maxevals=1000, rtol=0)
 
-    @test sum(abs.(vcat(tfm0.m[:], tfm0.v) - vcat(RotXYZ(tfm.m)[:], tfm.v))) < 0.1
+    @test sum(abs.(vcat(tfm0.linear[:], tfm0.translation) - vcat(RotXYZ(tfm.linear)[:], tfm.translation))) < 0.1
 
 #NOTE: the 2D test below fails rarely and the 3D test fails often, apparently because full affine is too difficult with these images
     #####General Affine Transformations
@@ -122,7 +122,7 @@ end
 
     tfm, mm = qd_affine(centered(fixed), moving, mxshift, SD; thresh=thresh, maxevals=1500, rtol=0, fvalue=1e-6)
 
-    @test sum(abs.(vcat(tfm0.m[:], tfm0.v) - vcat(tfm.m[:], tfm.v))) < 0.1
+    @test sum(abs.(vcat(tfm0.linear[:], tfm0.translation) - vcat(tfm.linear[:], tfm.translation))) < 0.1
 
     #The tests below fail.  Probably two factors contributing to failure:
     # 1) Full affine 3D is a lot of parameters so it's just difficuilt (12 parameters)
@@ -146,7 +146,7 @@ end
     #tfm, mm = qd_affine(centered(fixed), centered(moving), mxshift, SD; thresh=thresh, rtol=0, fvalue=1e-4);
 
     #@test mm <= 1e-4
-    #@test sum(abs.(vcat(tfm0.m[:], tfm0.v) - vcat(tfm.m[:], tfm.v))) < 0.1
+    #@test sum(abs.(vcat(tfm0.linear[:], tfm0.translation) - vcat(tfm.linear[:], tfm.translation))) < 0.1
     
     #not random
     #moving = zeros(10,10,10);
@@ -165,12 +165,12 @@ end
     #thresh = 0.5 * sum(abs2.(fixed[.!(isnan.(fixed))]));
     #mxshift = [5;5;5];
     #SD = eye(ndims(fixed));
-    #@test RegisterOptimize.aff(vcat(tfm00.v[:], tfm00.m[:]), fixed, SD) == tfm0
+    #@test RegisterOptimize.aff(vcat(tfm00.translation[:], tfm00.linear[:]), fixed, SD) == tfm0
 
     #tfm, mm = qd_affine(centered(fixed), centered(moving), mxshift, SD; thresh=thresh, rtol=0, fvalue=1e-4);
 
     #@test mm <= 1e-4
-    #@test sum(abs.(vcat(tfm0.m[:], tfm0.v) - vcat(tfm.m[:], tfm.v))) < 0.1
+    #@test sum(abs.(vcat(tfm0.linear[:], tfm0.translation) - vcat(tfm.linear[:], tfm.translation))) < 0.1
 
 end #tests with random images
 
@@ -185,8 +185,8 @@ function fixedmov(img, tfm)
 end
 
 #helpers to convert Transformations to AffineMaps
-to_affine(tfm::Translation) = AffineMap(eye(length(tfm.v)), tfm.v)
-to_affine(tfm::LinearMap) = AffineMap(eye(length(tfm.v)), tfm.v)
+to_affine(tfm::Translation) = AffineMap(eye(length(tfm.translation)), tfm.translation)
+to_affine(tfm::LinearMap) = AffineMap(eye(length(tfm.translation)), tfm.translation)
 to_affine(tfm::AffineMap) = tfm
 
 #Helper to test that a found transform is (roughly) the inverse of the original transform
@@ -195,9 +195,9 @@ function tfmtest(tfm, tfminv)
     diagtol = 0.005
     offdiagtol = 0.005
     vtol = 0.1
-    @test all(x->(1-diagtol < x < 1+diagtol), diag(comp.m))
-    @test all(x->(-offdiagtol < x < offdiagtol), comp.m.-diagm(diag(comp.m)))
-    @test all(abs.(comp.v) .< vtol)
+    @test all(x->(1-diagtol < x < 1+diagtol), diag(comp.linear))
+    @test all(x->(-offdiagtol < x < offdiagtol), comp.linear.-diagm(diag(comp.linear)))
+    @test all(abs.(comp.translation) .< vtol)
 end
 
 # tests with standard images
@@ -235,7 +235,7 @@ end
     #make it harder with nonuniform scaling
     scale = @SMatrix [1.005 0; 0 0.995]
     SD = eye(2)
-    tfm = AffineMap(tfm.m*scale, tfm.v)
+    tfm = AffineMap(tfm.linear*scale, tfm.translation)
     mxshift = (100,100) #make sure this isn't too small
     fixed, moving = fixedmov(centered(img), tfm)
     tform, mm = qd_affine(centered(fixed), centered(moving), mxshift, SD; maxevals=1000, rtol=0, fvalue=0.0002)
@@ -245,7 +245,7 @@ end
     SD = diagm([0.5; 1.0])
     tfm = Translation(@SVector([14.3, 17.8]))∘LinearMap(SD\RotMatrix(0.01)*SD)
     scale = @SMatrix [1.005 0; 0 0.995]
-    tfm = AffineMap(tfm.m*scale, tfm.v)
+    tfm = AffineMap(tfm.linear*scale, tfm.translation)
     fixed, moving = fixedmov(centered(img), tfm)
     tform, mm = qd_affine(centered(fixed), centered(moving), mxshift, SD; maxevals=1000, rtol=0, fvalue=0.0002)
     tfmtest(tfm, tform)

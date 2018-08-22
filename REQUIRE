@@ -1,24 +1,24 @@
 julia 0.6
-Images
-Interpolations
-AffineTransforms 0.2.1
-StaticArrays
+Images 0.14.0 0.15.0
+Interpolations 0.7.3 0.7.3+
+AffineTransforms 0.2.3 0.2.3+
+StaticArrays 0.7.2 0.7.2+
 NLsolve
-MathProgBase 0.4
-Ipopt
-IterativeSolvers 0.3
+MathProgBase 0.7.2 0.7.2+
+Ipopt 0.4.0 0.4.0+
+IterativeSolvers 0.6.0 0.6.0+
 CUDArt
-CUFFT
-HDF5
-JLD
-Reexport
+CUFFT 0.0.4 0.0.4+
+HDF5 0.9.3 0.9.3+
+JLD 0.8.3 0.8.3+
+Reexport 0.1.0 0.1.0+
 ForwardDiff 0.2.0
-ProgressMeter
-AxisArrays
-Ratios
-Compat 0.44
-ColorTypes
-OffsetArrays
+ProgressMeter 0.5.6 0.5.6+
+AxisArrays 0.2.1 0.2.1+
+Ratios 0.3.0 0.3.0+
+Compat 1.0.1 1.0.1+
+ColorTypes 0.6.7 0.6.7+
+OffsetArrays 0.6.0 0.6.0+
 Optim
 CoordinateTransformations
-Rotations
+Rotations 0.7.2 0.7.2+

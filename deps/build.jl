@@ -22,6 +22,11 @@ else
     end
 end
 
+if VERSION < v"0.7.0"
+    Pkg.checkout("ImageAxes", "julia0.6")
+    Pkg.pin("ImageAxes")
+end
+
 basedir = splitdir(splitdir(@__FILE__)[1])[1]
 cd(joinpath(basedir, "src")) do
     run(`make`)
