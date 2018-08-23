@@ -1,4 +1,4 @@
-julia 0.5
+julia 0.6
 Images
 Interpolations
 AffineTransforms 0.2.1
@@ -7,7 +7,9 @@ NLsolve
 MathProgBase 0.4
 Ipopt
 IterativeSolvers 0.3
-CUDArt
+CUDAapi 0.2.1 0.2.1+
+CUDAdrv 0.4.1 0.4.1+
+CUDArt 0.4.1 0.4.1+
 CUFFT
 HDF5
 JLD

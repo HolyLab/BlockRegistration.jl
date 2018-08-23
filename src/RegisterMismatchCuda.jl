@@ -35,7 +35,7 @@ The major types and functions exported are:
 RegisterMismatchCuda
 
 const ptxdict = Dict()
-const mdlist = Array(CuModule, 0)
+const mdlist = Array{CuModule}(0)
 
 function init(devlist)
     global ptxdict
@@ -44,7 +44,7 @@ function init(devlist)
     for dev in devlist
         device(dev)
         thisdir = splitdir(@__FILE__)[1]
-        md = CuModule(joinpath(thisdir, "register_mismatch_cuda.ptx"), false)
+        md = CuModuleFile(joinpath(thisdir, "register_mismatch_cuda.ptx"))
         ptxdict[(dev, "components_func", Float32)] = CuFunction(md, "kernel_conv_components_float")
         ptxdict[(dev, "components_func", Float64)] = CuFunction(md, "kernel_conv_components_double")
         ptxdict[(dev, "conv_func", :pixels, Float32)] = CuFunction(md, "kernel_calcNumDenom_pixels_float")
@@ -57,7 +57,8 @@ function init(devlist)
     end
 end
 
-close() = (for md in mdlist; unload(md); end; empty!(mdlist); empty!(ptxdict))
+#This should work because CUDAdrv is supposed to delegate memory management to Julia's GC
+close() = (empty!(mdlist); empty!(ptxdict))
 
 const FFTPROD = [2,3]
 
@@ -109,7 +110,7 @@ type CMStorage{T<:AbstractFloat,N}
         num = RCpair(T, padszt)
         denom = RCpair(T, padszt)
         mmsz = map(x->2x+1, (maxshift...))
-        numhost, denomhost = Array(T, mmsz), Array(T, mmsz)
+        numhost, denomhost = Array{T}(mmsz), Array{T}(mmsz)
         fftfunc = plan(num[2], num[1], stream=stream)
         ifftfunc = plan(num[1], num[2], stream=stream)
         maxshiftv = [maxshift...]
@@ -245,8 +246,8 @@ function fillfixed!{T}(cms::CMStorage{T}, fixed::CudaPitchedArray; f_indexes = n
     # Pad
     paddedf = cms.fixed.I1[1]
     fill!(paddedf, NaN, stream=stream)
-    dstindexes = Array(UnitRange{Int}, nd)
-    srcindexes = Array(UnitRange{Int}, nd)
+    dstindexes = Array{UnitRange{Int}}(nd)
+    srcindexes = Array{UnitRange{Int}}(nd)
     for idim = 1:nd
         tmp = f_indexes[idim]
         i1 = first(tmp) >= 1 ? 1 : 2-first(tmp)
@@ -257,9 +258,11 @@ function fillfixed!{T}(cms::CMStorage{T}, fixed::CudaPitchedArray; f_indexes = n
     copy!(paddedf, tuple(dstindexes...), fixed, tuple(srcindexes...), stream=stream)
     # Prepare the components of the convolution
     cudablocksize = (16,16)
-    nsm = attribute(device(), CUDArt.rt.cudaDevAttrMultiProcessorCount)
+    nsm = CUDArt.attribute(device(), CUDArt.rt.cudaDevAttrMultiProcessorCount)
     mul = min(32, ceil(Int, length(paddedf)/(prod(cudablocksize)*nsm)))
-    CUDArt.launch(components_func, mul*nsm, cudablocksize, (paddedf, cms.fixed.I2[1],  cms.fixed.I0[1],  size(paddedf,1), size(paddedf,2), size(paddedf,3), pitchel(paddedf)), stream=stream)
+    args = (pointer(paddedf), pointer(cms.fixed.I2[1]), pointer(cms.fixed.I0[1]), size(paddedf,1), size(paddedf,2), size(paddedf,3), pitchel(paddedf))
+    argtypes =  ((typeof(x) for x in args)...)
+    CUDAdrv.cudacall(components_func, mul*nsm, cudablocksize, argtypes, args...; shmem=4, stream=convert(CUDAdrv.CuStream, stream))
     # Compute FFTs
     obj = cms.fixed
     for item in (obj.I0, obj.I1, obj.I2)
@@ -288,9 +291,11 @@ function mismatch!{T}(mm::MismatchArray, cms::CMStorage{T}, moving::CudaPitchedA
     get!(paddedm, moving, ntuple(d->cms.getindexes[d]+m_offset[d], nd), NaN, stream=stream)
     # Prepare the components of the convolution
     cudablocksize = (16,16)
-    nsm = attribute(device(), CUDArt.rt.cudaDevAttrMultiProcessorCount)
+    nsm = CUDArt.attribute(device(), CUDArt.rt.cudaDevAttrMultiProcessorCount)
     mul = min(32, ceil(Int, length(paddedm)/(prod(cudablocksize)*nsm)))
-    CUDArt.launch(components_func, mul*nsm, cudablocksize, (paddedm, cms.moving.I2[1], cms.moving.I0[1], size(paddedm,1), size(paddedm,2), size(paddedm,3), pitchel(paddedm)), stream=stream)
+    args = (pointer(paddedm), pointer(cms.moving.I2[1]), pointer(cms.moving.I0[1]), size(paddedm,1), size(paddedm,2), size(paddedm,3), pitchel(paddedm))
+    argtypes =  ((typeof(x) for x in args)...)
+    CUDAdrv.cudacall(components_func, mul*nsm, cudablocksize, argtypes, args...; shmem=4, stream=convert(CUDAdrv.CuStream, stream))
     # Compute FFTs
     obj = cms.moving
     for item in (obj.I0, obj.I1, obj.I2)
@@ -299,24 +304,26 @@ function mismatch!{T}(mm::MismatchArray, cms::CMStorage{T}, moving::CudaPitchedA
     # Perform the convolution in fourier space
     d_numC = cms.num[2]
     d_denomC = cms.denom[2]
-    CUDArt.launch(conv_func, mul*nsm, cudablocksize, (
-        cms.fixed.I1[2],  cms.fixed.I2[2],  cms.fixed.I0[2],
-        cms.moving.I1[2], cms.moving.I2[2], cms.moving.I0[2],
-        cms.num[2], cms.denom[2],
-        size(d_numC,1), size(d_numC,2), size(d_numC,3), pitchel(d_numC)),
-        stream=stream)
+    args = (
+        pointer(cms.fixed.I1[2]),  pointer(cms.fixed.I2[2]),  pointer(cms.fixed.I0[2]),
+        pointer(cms.moving.I1[2]), pointer(cms.moving.I2[2]), pointer(cms.moving.I0[2]),
+        pointer(cms.num[2]), pointer(cms.denom[2]),
+        size(d_numC,1), size(d_numC,2), size(d_numC,3), pitchel(d_numC))
+    argtypes =  ((typeof(x) for x in args)...)
+    CUDAdrv.cudacall(conv_func, mul*nsm, cudablocksize, argtypes, args...; shmem=4, stream=convert(CUDAdrv.CuStream, stream))
     # Perform the equivalent of the fftshift
     fdshift = cms.fdshift
     d_num = cms.num[1]
     d_denom = cms.denom[1]
-    CUDArt.launch(fdshift_func, mul*nsm, cudablocksize, (
-        d_numC, d_denomC,
+    args = (
+        pointer(d_numC), pointer(d_denomC),
         convert(T,fdshift[1]),
         convert(T,length(fdshift)>1 ? fdshift[2] : 0),
         convert(T,length(fdshift)>2 ? fdshift[3] : 0),
         size(d_num,1), size(d_numC,1), size(d_numC,2), size(d_numC,3), pitchel(d_numC),
-        length(d_num)),
-        stream=stream)
+        length(d_num))
+    argtypes =  ((typeof(x) for x in args)...)
+    CUDAdrv.cudacall(fdshift_func, mul*nsm, cudablocksize, argtypes, args...; shmem=4, stream=convert(CUDAdrv.CuStream, stream))
     # Compute the IFFTs
     cms.ifftfunc(d_num, d_numC, false)
     cms.ifftfunc(d_denom, d_denomC, false)

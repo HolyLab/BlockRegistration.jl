@@ -22,6 +22,8 @@ else
     end
 end
 
+Pkg.checkout("CUFFT")
+
 basedir = splitdir(splitdir(@__FILE__)[1])[1]
 cd(joinpath(basedir, "src")) do
     run(`make`)

@@ -7,7 +7,9 @@ function run_components(f, A)
     G1 = CUDArt.CudaPitchedArray(A)
     G0 = CUDArt.CudaPitchedArray(eltype(A), size(A))
     G2 = CUDArt.CudaPitchedArray(eltype(A), size(A))
-    CUDArt.launch(f, 1, (4,4), (G1, G2, G0, size(G1,1), size(G1,2), size(G1,3), CUDArt.pitchel(G1)))
+    args = (pointer(G1), pointer(G2), pointer(G0), size(G1,1), size(G1,2), size(G1,3), CUDArt.pitchel(G1))
+    argtypes = ((typeof(x) for x in args)...)
+    CUDAdrv.cudacall(f, 1, (4,4), argtypes, args...)
     A0, A1, A2 = CUDArt.to_host(G0), CUDArt.to_host(G1), CUDArt.to_host(G2)
 end
 
@@ -25,11 +27,11 @@ CUDArt.devices(dev->CUDArt.capability(dev)[1] >= 2, nmax=1) do devlist
         A = [1 2; NaN 4]
         B = [NaN NaN; 5 NaN]
         A0, A1, A2 = run_components(f, A)
-        @test A0 == !isnan(A)
+        @test A0 == .!isnan.(A)
         @test A1 == [1 2; 0 4]
         @test A2 == [1 4; 0 16]
         B0, B1, B2 = run_components(f, B)
-        @test B0 == !isnan(B)
+        @test B0 == .!isnan.(B)
         @test B1 == [0 0; 5 0]
         @test B2 == [0 0; 25 0]
         A = zeros(5,5)
