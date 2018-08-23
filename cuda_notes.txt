@@ -1,0 +1,64 @@
+Getting CUDA installed and working properly is a prerequisite to using the GPU computing portions of this package.
+This can be a nontrivial task, so we're including some notes for the benefit of others.
+
+We assume you're using Ubuntu Linux.
+
+
+## Deciding what to install
+
+First decide which version of CUDA to install.
+Generally you want the newest version supported by your GPU hardware, GPU driver, and Linux version.
+Refer to Nvidia's guidelines for this and other info not provided here, read their "install guide for linux".
+A separate version of this guide is available for each CUDA version.
+CUDA versions 9.0+ do not support our c2075 and M2090 Tesla cards (Compute capability 2.0, Fermi architecture).
+Nvidia's guide covers most of what you need to know, but here we'll point out some subtleties that can lead to problems.
+
+
+## Driver installation
+
+After referring to the guide you may find that you need to install or update your GPU driver before installing CUDA.
+* A newer driver is always better (as long as it works); it's possible for a driver to be too old to work with a given CUDA version, but it seems it's never too new to be compatible.
+Nvidia's ".run" method allows you to install the driver along with the CUDA install.
+Alternatively you can install it separately via Ubuntu's system packages (apt install nvidia-xxx).
+In either case try to remove any previous drivers first (more details in Nvidia's guide).
+Ubuntu also offers CUDA packages.
+Lately we've had better luck with installing the driver via Ubuntu's package manager and installing CUDA with ".run" method, but you may need to experiment to see what works.
+You may also need to try different Ubuntu packages: on one machine we're using nvidia-384 because 387 and 390 dont work, even though they should.
+** If you use the package manager do yourself a favor and prevent the driver from auto-updating with this command: sudo apt-mark hold nvidia-xxx where xxx is the installed version
+When the driver is installed correctly you should be able to see info about your after typing "nvidia-smi" into the terminal (probably need to reboot).
+
+
+## CUDA libraries
+
+The points below assume that the correct driver is installed and working and you are installing CUDA with the ".run" method.
+
+With an older cuda version (we need 8.0 or earlier) and a newer Ubuntu the default gcc and g++ won't work.
+CUDA 8.0 requires gcc-4.8, gcc-5.4, or 5.3 and the corresponding g++-5 (CUDA 7.5 requires gcc-4.8 and g++-4.8).
+You can find these compiler requirements at the beginning of nvidia's official linux guide already mentioned.
+
+Before installing the Cuda toolkit with the .run method set the correct gcc/g++ using update-alternatives.
+
+Example:
+#this configures switching of gcc versions for building cuda toolkit.  Only need to run these lines once
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-7 100 --slave /usr/bin/g++ g++ /usr/bin/g++-7
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-5 100 --slave /usr/bin/g++ g++ /usr/bin/g++-5
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-4.8 100 --slave /usr/bin/g++ g++ /usr/bin/g++-4.8
+
+#then switch between versions like so
+sudo update-alternatives --config gcc
+
+After installing CUDA, set the default compilers back to the newest (gcc-7 and c++-7 for now)
+Then make sure the old compilers are always used by cuda by creating symlinks like this:
+
+sudo ln -s /usr/bin/gcc-5 /usr/local/cuda-8.0/bin/gcc 
+sudo ln -s /usr/bin/g++-5 /usr/local/cuda-8.0/bin/g++
+
+**If you get a build failure due to a missing "InstallUtils.pm".  Work around that as follows:
+    1. unpack .run file ./cuda*.run --tar mxvf
+    2. copy InstallUtils.pm to /usr/lib/x86_64-linux-gnu/perl-base
+
+
+## Run the CUDA samples as a test before testing in Julia
+
+Install the CUDA samples when the .run dialog asks.
+Then you can test that things work by compiling and running the deviceQuery example in the Cuda samples directory.
