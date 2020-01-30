@@ -1,6 +1,6 @@
 # BlockRegistration.jl
 
-[![Build Status](https://magnum.travis-ci.com/HolyLab/BlockRegistration.svg?token=su2Bzyut6KvcqmScAAsj&branch=master)](https://magnum.travis-ci.com/HolyLab/BlockRegistration)
+[![Build Status](https://magnum.travis-ci.com/HolyLab/BlockRegistration.svg?token=su2Bzyut6KvcqmScAAsj&branch=master)](https://magnum.travis-ci.com/HolyLab/BlockRegistration.jl)
 
 BlockRegistration is designed to perform non-rigid image registration---specifically, motion correction---for a time series of images.
 BlockRegistration works on images/movies with an arbitrary number of spatial dimensions and a single temporal dimension.
