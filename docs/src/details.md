@@ -56,3 +56,12 @@ To ensure that this happens correctly, you need to choose a `λrange` that effec
 The automatic choice may not be ideal (and it certainly takes more computation time),
 so you might consider experimenting with different `λ` and seeing which choice gives
 the best alignment.
+
+## Temporal regularization
+
+There is also a "whole experiment" mode that optimizes deformations for all images
+in a sequence simultaneously.
+In this mode, one can also supply a `λt`, which is a regularizer for changes in
+`λ` over time.
+This regularizer currently penalizes the sum-of-squared differences across time.
+Because real-world experiments sometimes have sudden movements, and the sum-of-squared differences smooths those transitions out, this mode is not currently recommended.
