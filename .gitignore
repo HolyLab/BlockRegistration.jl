@@ -1,1 +1,5 @@
 *.ptx
+docs/build
+docs/site
+Manifest.toml
+docs/Manifest.toml

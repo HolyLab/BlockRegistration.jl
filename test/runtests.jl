@@ -1,22 +1,4 @@
 using BlockRegistration
-push!(LOAD_PATH, dirname(@__FILE__))  # for RegisterTestUtilities
 
-function runtest(filename)
-    println(filename)
-    include(filename)
-end
-
-runtest("center_indexed_arrays.jl")
-runtest("cached_interpolations.jl")
-runtest("register_core.jl")
-runtest("register_deformation.jl")
-if !(isdefined(Main, :use_cuda) && Main.use_cuda==false) &&
-        !isempty(Libdl.find_library(["libcudart", "cudart"], ["/usr/local/cuda"]))
-    runtest("register_mismatch_cuda.jl")
-end
-runtest("register_mismatch.jl")
-runtest("register_fit.jl")
-runtest("register_penalty.jl")
-runtest("register_optimize.jl")
-runtest("register_affine.jl")
-runtest("register_hindsight.jl")
+# All tests are in dependent packages
+@test 1+1 == 2
