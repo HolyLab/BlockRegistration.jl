@@ -3,20 +3,18 @@ language: julia
 os:
   - linux
 julia:
-  - 0.6
-  - nightly
+  - 1
 notifications:
   email: false
-addons:
-  apt:
-    packages:
-      - build-essential
-      - gfortran
-      - pkg-config
-      - hdf5-tools
-script:
-  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
-  - julia -e 'Pkg.clone(pwd()); Pkg.build("BlockRegistration")'
-  # Because we circumvent Pkg.test, we have to install test dependencies manually
-  - julia -e 'cd(Pkg.dir("BlockRegistration","test")); if isfile("REQUIRE") reqs = readlines("REQUIRE"); for r in reqs Pkg.add(chomp(r)) end; end'
-  - julia -e 'cd(Pkg.dir("BlockRegistration","test")); use_cuda=false; include("runtests.jl")'
+
+jobs:
+  include:
+    - stage: "Documentation"
+      julia: 1
+      os: linux
+      script:
+        - julia --project=docs/ -e 'using Pkg; pkg"registry add General https://github.com/HolyLab/HolyLabRegistry.git";
+                                               Pkg.develop(PackageSpec(path=pwd()));
+                                               Pkg.instantiate()'
+        - julia --project=docs/ docs/make.jl
+      after_success: skip
