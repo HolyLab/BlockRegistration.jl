@@ -1,0 +1,7 @@
+[deps]
+CenterIndexedArrays = "46a7138f-0d70-54e1-8ada-fb8296f91f24"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+
+[compat]
+CenterIndexedArrays = "0.2"
+Documenter = "~0.24"
