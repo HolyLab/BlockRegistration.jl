@@ -99,7 +99,7 @@ Qs = Array{Any}(undef, gridsize)
 ap = AffinePenalty(nodes, first(λrange))
 
 # Now loop over each timeslice
-ϕs, λs, errs = [], [], []  # storage for results (the deformation, chosen λ, and resid for each timeslice)
+ϕs, λs, errs = AbstractDeformation[], [], []  # storage for results (the deformation, chosen λ, and resid for each timeslice)
 @showprogress 1 for tidx in axes(img, Axis{:time})
     moving = view(img, timeaxis(img)(tidx))
 
