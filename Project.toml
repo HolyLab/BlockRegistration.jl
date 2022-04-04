@@ -14,6 +14,9 @@ RegisterHindsight = "73fda715-febb-5522-a0fc-086e91958f61"
 RegisterOptimize = "b981a1b5-4587-53b0-9c3d-454c648f6f8d"
 RegisterPenalty = "464fa2a9-b19c-5c59-8698-f58c971f971e"
 
+[compat]
+Reexport = "1"
+
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
