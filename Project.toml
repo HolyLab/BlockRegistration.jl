@@ -17,7 +17,7 @@ RegisterPenalty = "464fa2a9-b19c-5c59-8698-f58c971f971e"
 [compat]
 Reexport = "1"
 julia = "1.3"
-RegisterDeformation = "0.2"
+RegisterDeformation = "0.3"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
