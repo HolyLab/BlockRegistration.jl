@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Stack-by-stack optimization: a cookbook · BlockRegistration.jl</title><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit">BlockRegistration.jl</span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Stack-by-stack optimization: a cookbook</a><ul class="internal"><li><a class="tocitem" href="#results-1"><span>Visualizing the results</span></a></li></ul></li><li><a class="tocitem" href="../details/">Components of registration</a></li><li><a class="tocitem" href="../improving/">Improving alignment</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Stack-by-stack optimization: a cookbook</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Stack-by-stack optimization: a cookbook</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/HolyLab/BlockRegistration.jl/blob/master/docs/src/cookbook.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="cookbook-1"><a class="docs-heading-anchor" href="#cookbook-1">Stack-by-stack optimization: a cookbook</a><a class="docs-heading-anchor-permalink" href="#cookbook-1" title="Permalink"></a></h1><p>For practical use with large images you might prefer the &quot;stack-by-stack registration&quot; section of <a href="https://github.com/HolyLab/BlockRegistrationScheduler">BlockRegistrationScheduler</a>. If you&#39;re using the scheduler, many parts of the rest of this cookbook do not apply. However, if your goal is to learn the internals, it&#39;s easier and more informative to start with BlockRegistration.</p><p>Let&#39;s start with a simple two-dimensional demonstration. The code below is heavily annotated to explain what each step does.</p><pre><code class="language-julia">using FileIO, Images, Unitful, StaticArrays, ProgressMeter
+using AxisArrays: Axis, AxisArray
+using BlockRegistration
+using RegisterMismatch  # no CUDA
+
+# Some physical units we may need (from the Unitful package)
+const μm = u&quot;μm&quot;  # micrometers
+const s  = u&quot;s&quot;   # seconds
+
+# Load your image (movie) into a variable called `img`.
+# It might look like this:
+#     img = load(&quot;myimage&quot;)  # filename of your image
+# Here we will just use a demo script (see the `test/` directory)
+brdir = dirname(dirname(pathof(BlockRegistration)))   # directory of BlockRegistration
+include(joinpath(brdir, &quot;test&quot;, &quot;gen2d.jl&quot;));          # defines `img`
+
+# Note: if you&#39;re loading from a file type that doesn&#39;t return an AxisArray,
+# add something like this:
+#    img = AxisArray(img, (:y, :x, :time), (Δy, Δx, Δt))  # for 2d images + time
+# where Δy, Δx is the pixel spacing along y and x, respectively, and
+# Δt the time between successive frames. (The latter isn&#39;t really used for anything.)
+# For example:
+#    img = AxisArray(img, (:x, :y, :time), (1.15μm, 1.15μm, 0.2s));
+
+# If you need to select a region of interest, do something like
+#    img = view(img, 150:800, 50:600, :)
+
+# Now select your reference (&quot;fixed&quot;) image. This chooses the middle
+# frame/stack, assuming you&#39;ve set a :time axis
+fixedidx = (nimages(img) + 1) ÷ 2  # ÷ can be obtained with &quot;\div[TAB]&quot;
+# Note: this next line extracts the timeslice.
+# This is like `img[:, :, t]` or `img[:, :, :, t]` but it
+# works for any dimensionality or ordering of the dimensions.
+fixed = img[timeaxis(img)(fixedidx)]
+
+# Important: inspect fixed to make sure it seems OK! You don&#39;t want to
+# align to an image that happens to have an artifact.
+
+# At very low SNR you might consider smoothing both fixed and moving before running
+# registration (see the JuliaImages documentation)
+
+## With the preliminaries out of the way, let&#39;s get started. Specify a few parameters.
+# Choose the maximum amount of movement you want to allow (set this by visual inspection)
+mxshift = (30, 30)  # 30 pixels along each spatial axis for a 2d+time image
+# Pick a grid size for your registration. Finer grids allow more
+# &quot;detail&quot; in the deformation, but also have more parameters and
+# therefore require higher SNR data.
+gridsize = (3, 3)   # it&#39;s fine to choose something anisotropic
+# Pick a threshold for sufficiency of data. The aim of this parameter is to prevent
+# the algorithm from considering solutions where the two images barely have any overlap,
+# e.g., where the algorithm chooses to align images
+#        A  A  A                  B  B  B
+#        A  A  A       and        B  B  B
+#        A  A  A                  B  B  B
+# as
+#                 A  A  A
+#                 A  A  A
+#                 A  A  O  B  B      (O = overlap region)
+#                       B  B  B
+#                       B  B  B
+# just to get all the high-SNR regions &quot;out of the way&quot;.
+#
+# The choice below effectively requires that we have at least 1/4 of a
+# grid-block&#39;s worth of data before we take any results seriously.
+thresh_fac=(0.5)^ndims(fixed)
+thresh = (thresh_fac/prod(gridsize)) * length(fixed)
+# Set λrange. See info below. You can alternatively choose a single number, e.g.,
+#     λrange = 0.003
+λrange = (1e-6, 1.0)    # (lo, hi)
+
+## Calculated and pre-allocated parameters
+# grid geometry
+aperture_centers = aperture_grid(size_spatial(img), gridsize)
+aperture_width = default_aperture_width(fixed, gridsize)
+nodes = map(axes(fixed), gridsize) do ax, g
+    range(first(ax), stop=last(ax), length=g)
+end
+# allocate storage for quadratic model of blockwise mismatch data
+E0 = zeros(gridsize)
+cs = Array{Any}(undef, gridsize)
+Qs = Array{Any}(undef, gridsize)
+
+# AffinePenalty handles regularization, penalizing any deformation in proportion to
+# the degree to which it disagrees with its own best-fit affine transformation.
+# λ (via λrange) specifies the weighting of this deformation penalty.
+ap = AffinePenalty(nodes, first(λrange))
+
+# Now loop over each timeslice
+ϕs, λs, errs = [], [], []  # storage for results (the deformation, chosen λ, and resid for each timeslice)
+@showprogress 1 for tidx in axes(img, Axis{:time})
+    moving = view(img, timeaxis(img)(tidx))
+
+    # Compute the mismatch for all deformations that are piecewise-constant
+    # over the grid.
+    mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift)
+
+    # Some cameras generate fixed-pattern noise, which acts as an &quot;anchor&quot;
+    # preventing movement. Even if you can&#39;t see the fixed-pattern noise by
+    # eye, its cumulative effect over an entire block can be substantial.
+    # The hallmark is a &quot;cross&quot; pattern centered on the middle of each block of `mms`,
+    # which introduces a bias to choose a shift of 0 on a per-coordinate basis.
+    #
+    # The commented-out command below attempts to discard this noise.
+    # _Don&#39;t_ use it unless you know you need to, because bias correction can
+    # easily make the registration worse.
+    # On more modern sCMOS cameras this may not be necessary.
+    # correctbias!(mms)
+
+    # Construct a quadratic fit to the mismatch data in each block of the grid
+    # We&#39;ll use this to help initialize the deformation to a good starting value.
+    for i in eachindex(mms)
+        E0[i], cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)
+    end
+
+    # Prepare for optimization
+    mmis = interpolate_mm!(mms)
+    if isa(λrange, Number)
+        # We&#39;ve specified a particular value for λ
+        ϕ, mismatch = fixed_λ(cs, Qs, nodes, ap, mmis)
+        λ = λrange
+    else
+        # We&#39;ve specified a range for λ. Try to choose a &quot;good value&quot; (see below)
+        ϕ, mismatch, λ, λvec, dp, quality = auto_λ(cs, Qs, nodes, ap, mmis, λrange)
+    end
+    # Save the result for later use. Of course you can save more data than this,
+    # e.g., the value of the mismatch might be an indication of quality.
+    push!(ϕs, ϕ)
+    push!(λs, λ)
+    push!(errs, mismatch)
+end
+
+all(errs .&lt; 0.03)
+
+# output
+
+true</code></pre><p>If you prefer, you can put everything after the parameter settings (<code>maxshift</code>, <code>gridsize</code>, <code>thresh</code>, and <code>λrange</code>) into a function that you reuse across experiments.</p><p>Let&#39;s look at the results. When you&#39;re registering &quot;big data,&quot; you will usually need to save the warped images to disk:</p><pre><code class="language-julia"># .cam is from ImagineFormat.jl (or use NRRD, etc.)
+open(&quot;my_registered_image.cam&quot;, &quot;w&quot;) do file
+    warp!(Float32, file, img, ϕs; nworkers=3)
+end</code></pre><p>But if you&#39;re testing this on the small demo in <code>&quot;test/gen2d.jl&quot;</code>, we can do it in memory:</p><pre><code class="language-julia"># Allocate storage for the warped image
+imgw = similar(img, Gray{Float32});   # eltype needs to be able to store NaN
+for i = 1:nimages(img)
+    # Apply the deformation to the &quot;recorded&quot; image
+    imgw[:,:,i] = warp(img[:,:,i], ϕs[i])
+end</code></pre><h2 id="results-1"><a class="docs-heading-anchor" href="#results-1">Visualizing the results</a><a class="docs-heading-anchor-permalink" href="#results-1" title="Permalink"></a></h2><p>You can check the results with</p><pre><code class="language-julia">using ImageView
+imshow(imgw)</code></pre><p>If you try this demo, you&#39;ll see the strengths and weaknesses of BlockRegistration: for a &quot;minimize the mean square difference&quot; algorithm it&#39;s quite fast, and the warped image is better than the original, but it&#39;s certainly not perfect. For example, here is an overlay of the fixed image (the middle frame in the movie) in magenta and the first moving image (the first image in the movie) in green:</p><table><tr><th style="text-align: right">Original</th><th style="text-align: right">Aligned</th></tr><tr><td style="text-align: right"><img src="../assets/original1.png" alt="orig1"/></td><td style="text-align: right"><img src="../assets/aligned1.png" alt="align1"/></td></tr></table><p>You can see the corrected alignment is quite good; the original has a fair amount of misalignment (as evidenced by the magenta and green, which indicates different intensities in the fixed and moving image), whereas after motion correction the two line up fairly closely (most pixels are very close to pure grayscale).</p><p>But now let&#39;s look at the last image in the series, which has a different deformation:</p><table><tr><th style="text-align: right">Original</th><th style="text-align: right">Aligned</th></tr><tr><td style="text-align: right"><img src="../assets/original2.png" alt="orig2"/></td><td style="text-align: right"><img src="../assets/aligned2.png" alt="align2"/></td></tr></table><p>The aligned pair is certainly better, but far from perfect.</p><p>Next we dive a bit deeper to explain a few key features of this approach, and to explore some of the ways you can improve on these results.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../details/">Components of registration »</a></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Wednesday 12 February 2025 15:53">Wednesday 12 February 2025</span>. Using Julia version 1.11.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
