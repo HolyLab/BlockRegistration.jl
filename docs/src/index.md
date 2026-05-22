@@ -22,7 +22,7 @@ BlockRegistration is written in the [Julia programming language](https://juliala
 ## Installation
 
 If you don't already have it, add [HolyLabRegistry](https://github.com/HolyLab/HolyLabRegistry#usage) as a registry.
-Then from [package mode](https://julialang.github.io/Pkg.jl/v1/getting-started/) just do
+Then from [package mode](https://pkgdocs.julialang.org/v1/getting-started/) just do
 
 ```julia
 pkg> add BlockRegistration RegisterMismatch
@@ -31,7 +31,7 @@ pkg> add BlockRegistration RegisterMismatch
 If you have GPUs available, you may also want to add `RegisterMismatchCuda`.
 This requires that you have nvidia drivers installed on your system.
 
-See also [BlockRegistrationScheduler](https://github.com/HolyLab/BlockRegistrationScheduler), which allows you to parallelize registration across worker processes.
+See also [BlockRegistrationScheduler](https://github.com/HolyLab/BlockRegistrationScheduler.jl), which allows you to parallelize registration across worker processes.
 It works for both CPU (`RegisterMismatch`) and GPU (`RegisterMismatchCuda`),
 though for GPU you need a dedicated GPU card for each worker process.
 
@@ -71,3 +71,9 @@ its own documentation.
 Given that "published" documentation is still a bit sparse,
 also consider looking at the code in each package's
 `test/` folder as an example of how to use these modules.
+
+## Reference
+
+```@docs
+BlockRegistration
+```

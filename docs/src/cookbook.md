@@ -2,7 +2,7 @@
 
 For practical use with large images you might prefer the "stack-by-stack registration"
 section of
-[BlockRegistrationScheduler](https://github.com/HolyLab/BlockRegistrationScheduler).
+[BlockRegistrationScheduler](https://github.com/HolyLab/BlockRegistrationScheduler.jl).
 If you're using the scheduler, many parts of the rest of this cookbook
 do not apply.
 However, if your goal is to learn the internals, it's easier and more informative to start with BlockRegistration.
@@ -10,7 +10,7 @@ However, if your goal is to learn the internals, it's easier and more informativ
 Let's start with a simple two-dimensional demonstration.
 The code below is heavily annotated to explain what each step does.
 
-```jldoctest cookbook; filter=[r"Planning.*", r"Progress.*"]
+```jldoctest cookbook
 using FileIO, Images, Unitful, StaticArrays, ProgressMeter
 using AxisArrays: Axis, AxisArray
 using BlockRegistration
@@ -99,13 +99,16 @@ Qs = Array{Any}(undef, gridsize)
 ap = AffinePenalty(nodes, first(λrange))
 
 # Now loop over each timeslice
+# (In practice, wrap the `for` with `@showprogress 1` to display a progress bar)
 ϕs, λs, errs = [], [], []  # storage for results (the deformation, chosen λ, and resid for each timeslice)
-@showprogress 1 for tidx in axes(img, Axis{:time})
+for tidx in axes(img, Axis{:time})
     moving = view(img, timeaxis(img)(tidx))
 
     # Compute the mismatch for all deformations that are piecewise-constant
     # over the grid.
-    mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift)
+    mms = redirect_stdout(devnull) do
+        mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift)
+    end
 
     # Some cameras generate fixed-pattern noise, which acts as an "anchor"
     # preventing movement. Even if you can't see the fixed-pattern noise by
@@ -172,6 +175,9 @@ for i = 1:nimages(img)
     # Apply the deformation to the "recorded" image
     imgw[:,:,i] = warp(img[:,:,i], ϕs[i])
 end
+
+# output
+
 ```
 
 ## [Visualizing the results](@id results)
