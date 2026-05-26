@@ -14,6 +14,7 @@ The code below is heavily annotated to explain what each step does.
 using FileIO, Images, Unitful, StaticArrays, ProgressMeter
 using AxisArrays: Axis, AxisArray
 using BlockRegistration
+using FFTW: FFTW
 using RegisterMismatch  # no CUDA
 
 # Some physical units we may need (from the Unitful package)
@@ -105,10 +106,9 @@ for tidx in axes(img, Axis{:time})
     moving = view(img, timeaxis(img)(tidx))
 
     # Compute the mismatch for all deformations that are piecewise-constant
-    # over the grid.
-    mms = redirect_stdout(devnull) do
-        mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift)
-    end
+    # over the grid. Use FFTW.ESTIMATE to skip the planning-progress message.
+    mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift;
+                             flags=FFTW.ESTIMATE)
 
     # Some cameras generate fixed-pattern noise, which acts as an "anchor"
     # preventing movement. Even if you can't see the fixed-pattern noise by
