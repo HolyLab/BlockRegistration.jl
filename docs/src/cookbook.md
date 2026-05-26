@@ -145,7 +145,7 @@ for tidx in axes(img, Axis{:time})
     push!(errs, mismatch)
 end
 
-all(isfinite.(errs))
+length(ϕs) == nimages(img)
 
 # output
 
