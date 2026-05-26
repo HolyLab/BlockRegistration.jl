@@ -10,11 +10,10 @@ However, if your goal is to learn the internals, it's easier and more informativ
 Let's start with a simple two-dimensional demonstration.
 The code below is heavily annotated to explain what each step does.
 
-```jldoctest cookbook
+```julia
 using FileIO, Images, Unitful, StaticArrays, ProgressMeter
 using AxisArrays: Axis, AxisArray
 using BlockRegistration
-using FFTW: FFTW
 using RegisterMismatch  # no CUDA
 
 # Some physical units we may need (from the Unitful package)
@@ -106,9 +105,8 @@ for tidx in axes(img, Axis{:time})
     moving = view(img, timeaxis(img)(tidx))
 
     # Compute the mismatch for all deformations that are piecewise-constant
-    # over the grid. Use FFTW.ESTIMATE to skip the planning-progress message.
-    mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift;
-                             flags=FFTW.ESTIMATE)
+    # over the grid.
+    mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift)
 
     # Some cameras generate fixed-pattern noise, which acts as an "anchor"
     # preventing movement. Even if you can't see the fixed-pattern noise by
@@ -145,11 +143,6 @@ for tidx in axes(img, Axis{:time})
     push!(errs, mismatch)
 end
 
-length(ϕs) == nimages(img)
-
-# output
-
-true
 ```
 
 If you prefer, you can put everything after the parameter settings
@@ -168,16 +161,13 @@ end
 
 But if you're testing this on the small demo in `"test/gen2d.jl"`, we can do it in memory:
 
-```jldoctest cookbook; filter="\".*"
+```julia
 # Allocate storage for the warped image
 imgw = similar(img, Gray{Float32});   # eltype needs to be able to store NaN
 for i = 1:nimages(img)
     # Apply the deformation to the "recorded" image
     imgw[:,:,i] = warp(img[:,:,i], ϕs[i])
 end
-
-# output
-
 ```
 
 ## [Visualizing the results](@id results)
