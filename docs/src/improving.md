@@ -21,7 +21,7 @@ with a fixed value of `λ = 1e-6`, we seem to do somewhat better on that trouble
 It is possible to use the solution as an initializer to iteratively improve the alignment.
 The idea is that
 
-```jldoctest cookbook
+```julia
 moving = img[:,:,end]
 ϕ1 = ϕs[end]
 movw1 = warp(moving, ϕ1)
@@ -30,7 +30,7 @@ movw1 = warp(moving, ϕ1)
 represents a closer match to `fixed` than `moving` itself; we can then calculate
 a `ϕ2` that aligns `movw1` to `fixed` and then compose them:
 
-```jldoctest cookbook
+```julia
 mms = mismatch_apertures(fixed, movw1, aperture_centers, aperture_width, mxshift)
 for i in eachindex(mms)
     E0[i], cs[i], Qs[i] = qfit(mms[i], thresh; opt=false)
@@ -41,7 +41,7 @@ mmis = interpolate_mm!(mms)
 
 `ϕ2` should approximately align `movw1` to fixed, and consequently
 
-```jldoctest cookbook
+```julia
 using Interpolations
 ϕtot = interpolate(ϕ1)(ϕ2)
 ```
@@ -82,7 +82,7 @@ More conventional registration frameworks directly model the mismatch associated
 `moving(ϕ(x))` and perform descent on `ϕ`.
 [RegisterHindsight](https://github.com/HolyLab/RegisterHindsight.jl) lets you optimize `ϕ` in this manner:
 
-```jldoctest cookbook
+```julia
 moving, ϕ0, λ = img[:,:,end], ϕs[end], λs[end]
 ϕ = interpolate!(copy(ϕ0))        # not the same as `interpolate(ϕ0)`, see docs
 ap = AffinePenalty(ϕ.nodes, λ/100)   # note /100! `auto_λ` often seems to choose high

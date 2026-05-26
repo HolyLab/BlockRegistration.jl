@@ -7,7 +7,7 @@ the mismatch between images is represented using an array where each element cor
 From the demo in the [cookbook](@ref), we can select a particular moving image,
 compute the mismatch, and visualize it:
 
-```jldoctest cookbook
+```julia
 moving = img[:,:,1]
 mms = mismatch_apertures(fixed, moving, aperture_centers, aperture_width, mxshift)
 # Turn the mismatch from NumDenom to a plain ratio (see RegisterCore docs)

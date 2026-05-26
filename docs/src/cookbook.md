@@ -2,7 +2,7 @@
 
 For practical use with large images you might prefer the "stack-by-stack registration"
 section of
-[BlockRegistrationScheduler](https://github.com/HolyLab/BlockRegistrationScheduler).
+[BlockRegistrationScheduler](https://github.com/HolyLab/BlockRegistrationScheduler.jl).
 If you're using the scheduler, many parts of the rest of this cookbook
 do not apply.
 However, if your goal is to learn the internals, it's easier and more informative to start with BlockRegistration.
@@ -10,7 +10,7 @@ However, if your goal is to learn the internals, it's easier and more informativ
 Let's start with a simple two-dimensional demonstration.
 The code below is heavily annotated to explain what each step does.
 
-```jldoctest cookbook; filter=[r"Planning.*", r"Progress.*"]
+```julia
 using FileIO, Images, Unitful, StaticArrays, ProgressMeter
 using AxisArrays: Axis, AxisArray
 using BlockRegistration
@@ -99,8 +99,9 @@ Qs = Array{Any}(undef, gridsize)
 ap = AffinePenalty(nodes, first(λrange))
 
 # Now loop over each timeslice
+# (In practice, wrap the `for` with `@showprogress 1` to display a progress bar)
 ϕs, λs, errs = [], [], []  # storage for results (the deformation, chosen λ, and resid for each timeslice)
-@showprogress 1 for tidx in axes(img, Axis{:time})
+for tidx in axes(img, Axis{:time})
     moving = view(img, timeaxis(img)(tidx))
 
     # Compute the mismatch for all deformations that are piecewise-constant
@@ -142,11 +143,6 @@ ap = AffinePenalty(nodes, first(λrange))
     push!(errs, mismatch)
 end
 
-all(errs .< 0.03)
-
-# output
-
-true
 ```
 
 If you prefer, you can put everything after the parameter settings
@@ -165,7 +161,7 @@ end
 
 But if you're testing this on the small demo in `"test/gen2d.jl"`, we can do it in memory:
 
-```jldoctest cookbook; filter="\".*"
+```julia
 # Allocate storage for the warped image
 imgw = similar(img, Gray{Float32});   # eltype needs to be able to store NaN
 for i = 1:nimages(img)

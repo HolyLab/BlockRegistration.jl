@@ -2,4 +2,9 @@
 docs/build
 docs/site
 Manifest.toml
+Manifest-v*.toml
 docs/Manifest.toml
+docs/Manifest-v*.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
